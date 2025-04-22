@@ -1,0 +1,19 @@
+name: nanoTS
+channels:
+  - conda-forge
+  - pytorch
+  - defaults
+  - bioconda
+dependencies:
+  - minimap2
+  - python=3.12
+  - pytorch
+  - scipy
+  - pysam
+  - numpy
+  - pandas
+  - scikit-learn
+  - progressbar
+  - "samtools>=1.9"
+  - whatshap
+
