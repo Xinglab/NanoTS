@@ -16,13 +16,13 @@ def filter_vcf(vcf, QUAL):
         # Decompress with zcat and then filter
         filter_cmd = (
             f"zcat \"{vcf}\" | "
-            f"awk 'BEGIN {{OFS=\"\\t\"}} /^#/ {{print; next}} $6 >= \"{QUAL}\" {{print}}' "
+            f"awk 'BEGIN {{OFS=\"\\t\"}} /^#/ {{print; next}} $6 >= {QUAL} {{print}}' "
             f"> \"{vcf}_filtered.vcf\""
         )
     else:
         # Directly filter uncompressed VCF
         filter_cmd = (
-            f"awk 'BEGIN {{OFS=\"\\t\"}} /^#/ {{print; next}} $6 >= \"{QUAL}\" {{print}}' "
+            f"awk 'BEGIN {{OFS=\"\\t\"}} /^#/ {{print; next}} $6 >= {QUAL} {{print}}' "
             f"\"{vcf}\" > \"{vcf}_filtered.vcf\""
         )
 
