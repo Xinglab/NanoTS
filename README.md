@@ -35,6 +35,7 @@ NanoTS is a command-line tool with the following subcommands:
 
 | Subcommand       | Description                                              |
 |------------------|----------------------------------------------------------|
+| **bam**          | Suffix each BAM alignment QNAME by count per read. |
 | **unphased_call** | Extracts candidate SNPs and features from a BAM file.   |
 | **haplotype**    | Performs haplotype phasing using a VCF, reference, and BAM file. |
 | **phased_call**  | Processes phased SNP calls with the deep-learning model. |
@@ -60,8 +61,16 @@ NanoTS uses pre-trained models for SNP calling:
 ---
 
 ## **Subcommands & Arguments**
+### **1️⃣ bam**
+Suffix each BAM alignment QNAME by count per read, e.g., read_1, read_2 for split reads.
+#### **Required Arguments:**
+| Argument   | Description                                        |
+|------------|----------------------------------------------------|
+| `-i/--input`    | Input sorted BAM file.                      |
+| `-o/--output`    | Output BAM file with suffixed QNAMEs.                      |
 
-### **1️⃣ unphased_call**
+
+### **2️⃣ unphased_call**
 Extracts candidate variants and features for **deep learning-based SNP calling**.
 
 #### **Required Arguments:**
@@ -86,7 +95,7 @@ Extracts candidate variants and features for **deep learning-based SNP calling**
 
 ---
 
-### **2️⃣ haplotype**
+### **3️⃣ haplotype**
 Performs **haplotype phasing** using an input **VCF, reference genome, and BAM file**.
 
 #### **Required Arguments:**
@@ -99,7 +108,7 @@ Performs **haplotype phasing** using an input **VCF, reference genome, and BAM f
 
 ---
 
-### **3️⃣ phased_call**
+### **4️⃣ phased_call**
 Processes **phased variant calls** using the deep-learning model.
 
 #### **Required Arguments:**
@@ -118,7 +127,7 @@ Processes **phased variant calls** using the deep-learning model.
 
 ---
 
-### **4️⃣ clean**
+### **5️⃣ clean**
 Removes **temporary files** in the output folder.
 
 #### **Required Arguments:**
@@ -142,21 +151,23 @@ samtools faidx hg38.fa
 # Align Nanopore reads to the reference genome
 minimap2 -ax splice -ub -t 24 -k 14 -w 4 --secondary=no hg38.fa tutorial.fastq.gz | \
 samtools sort -o tutorial.bam
-samtools index tutorial.bam
 
 # Define output directory
 outdir=nanoTS_result/
 
-# Step 1: Unphased SNP calling
-nanoTS unphased_call --bam tutorial.bam --ALT 2 --ratio 0.05 --ref hg38.fa --threads 24 --outdir $outdir --model ../model/unphased_cDNA_nanopore_R104_HG002.pth
+# Step 1: Suffix each BAM alignment QNAME by count per read
+nanoTS bam -i tutorial.bam -o tutorial.qname.bam
 
-# Step 2: Haplotype phasing
-nanoTS haplotype --vcf ${outdir}unphased_predict.pass.vcf --ref hg38.fa --bam tutorial.bam --outdir $outdir
+# Step 2: Unphased SNP calling
+nanoTS unphased_call --bam tutorial.qname.bam --ALT 2 --ratio 0.05 --ref hg38.fa --threads 24 --outdir $outdir --model ../model/unphased_cDNA_nanopore_R104_HG002.pth
 
-# Step 3: Phased SNP calling
-nanoTS phased_call --bam tutorial.bam --ref hg38.fa --threads 24 --outdir $outdir --model ../model/phased_cDNA_nanopore_R104_HG002.pth
+# Step 3: Haplotype phasing
+nanoTS haplotype --vcf ${outdir}unphased_predict.pass.vcf --ref hg38.fa --bam tutorial.qname.bam --outdir $outdir
 
-# Step 4: Clean temporary files
+# Step 4: Phased SNP calling
+nanoTS phased_call --bam tutorial.qname.bam --ref hg38.fa --threads 24 --outdir $outdir --model ../model/phased_cDNA_nanopore_R104_HG002.pth
+
+# Step 5: Clean temporary files
 nanoTS clean --outdir $outdir
 ```
 

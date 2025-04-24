@@ -91,6 +91,9 @@ def run_whatshap(vcf, ref, bam, phase, QUAL):
     )
     run_command(phase_cmd)
 
+    assign_unphase_cmd = f"sed -i 's/\\b0\\/1\\b/0|1/g' {phase}/whatshap.vcf"
+    run_command(assign_unphase_cmd)
+
     # Step 2: Compress and index the phased VCF
     compress_cmd = f"bgzip -c \"{phase}/whatshap.vcf\" > \"{phase}/whatshap.vcf.gz\""
     run_command(compress_cmd)

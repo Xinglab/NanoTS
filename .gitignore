@@ -1,5 +1,6 @@
 #
 build_singularity
+example/tutorial.qname.bam*
 example/hg38.fa
 example/hg38.fa.fai
 example/nanoTS_result

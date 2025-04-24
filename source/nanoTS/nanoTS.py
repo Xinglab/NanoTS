@@ -1,3 +1,5 @@
+import pysam
+from collections import defaultdict
 import argparse
 import sys
 import subprocess
@@ -25,6 +27,29 @@ logging.basicConfig(
         # logging.FileHandler("nanoTS.log")  # Uncomment to enable file logging
     ]
 )
+
+def run_suffix_qname_by_alignment(bam_in_path, bam_out_path):
+    logging.info(f"Process BAM file {bam_in_path}")
+    if not os.path.exists(bam_in_path):
+        logging.error(f"Error: Required file {bam_in_path} does not exist.")
+        sys.exit(1)
+    bam_in = pysam.AlignmentFile(bam_in_path, "rb")
+    bam_out = pysam.AlignmentFile(bam_out_path, "wb", template=bam_in)
+
+    qname_counts = defaultdict(int)
+
+    for read in bam_in:
+        qname = read.query_name
+        qname_counts[qname] += 1
+        read.query_name = f"{qname}_{qname_counts[qname]}"
+        bam_out.write(read)
+
+    bam_in.close()
+    bam_out.close()
+    logging.info(f"Index BAM file {bam_out_path}")
+    # Index the new BAM
+    pysam.index(bam_out_path)
+    logging.info("Done")
 
 def delete_related_files(outdir):
     """
@@ -255,7 +280,12 @@ def parse_arguments():
     """
     parser = argparse.ArgumentParser(description="nanoTS: Nanopore SNV calling using deep-learning method.")
     subparsers = parser.add_subparsers(dest="command", required=True, help="Sub-command to run")
-
+    
+    # Subcommand: bam
+    parser_bam = subparsers.add_parser("bam", help="Suffix each BAM alignment QNAME by count per read (e.g., read_1, read_2 for split reads).")
+    parser_bam.add_argument("-i", "--input", required=True, help="Input sorted BAM file")
+    parser_bam.add_argument("-o", "--output", required=True, help="Output BAM file with suffixed QNAMEs")
+    
     # Subcommand: unphased_call
     parser_unphased = subparsers.add_parser("unphased_call", help="Run unphased variant calling")
     parser_unphased.add_argument("--bam", required=True, help="Path to input sorted and indexed BAM file.")
@@ -307,7 +337,9 @@ def parse_arguments():
 
 def main():
     args = parse_arguments()
-    if args.command == "unphased_call":
+    if args.command == "bam":
+        run_suffix_qname_by_alignment(args.input,args.output)  
+    elif args.command == "unphased_call":
         run_unphased_call(
             bam=args.bam,
             ref=args.ref,
