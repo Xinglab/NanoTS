@@ -436,12 +436,12 @@ def organize_variant_phase(raw_list,h1_list,h2_list,variant_df,model):
         pred_genotype_prob= pred_genotype_prob.numpy()
 
 
-    homo_alt_idx = (pred_genotype == 2) & (pred_genotype_prob[:, 2] < 0.9) & (pred_genotype_prob[:, 1] >pred_genotype_prob[:, 0])
-
+    #homo_alt_idx = (pred_genotype == 2) & (pred_genotype_prob[:, 2] < 0.9) & (pred_genotype_prob[:, 1] >pred_genotype_prob[:, 0])
+    homo_alt_idx = (pred_genotype == 2)  & (pred_genotype_prob[:, 1] >pred_genotype_prob[:, 0])   
     homo_alt_p_value = adjust_homo_alt(h1_list, h2_list, np.where(homo_alt_idx)[0])
 
     # Update genotype predictions where p-value < 0.01
-    update_indices = np.where(homo_alt_idx)[0][np.array(homo_alt_p_value) < 0.01]
+    update_indices = np.where(homo_alt_idx)[0][np.array(homo_alt_p_value) < 0.00001]
 
     #print(update_indices)
     pred_genotype[update_indices] = 1
