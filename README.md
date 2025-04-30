@@ -16,7 +16,7 @@ conda activate nanoTS
 Clone and install `nanoTS`:
 
 ```bash
-git clone https://github.com/yourusername/nanoTS.git
+git clone git@github.com:Xinglab/NanoTS.git
 cd nanoTS
 pip install .
 ```
@@ -40,6 +40,7 @@ NanoTS is a command-line tool with the following subcommands:
 | **haplotype**    | Performs haplotype phasing using a VCF, reference, and BAM file. |
 | **phased_call**  | Processes phased SNP calls with the deep-learning model. |
 | **clean**        | Removes temporary files from the output directory.       |
+| **full_pipeline**        | One-in-all command. Include above all steps.       |
 
 ### **General Command Format**
 ```bash
@@ -150,25 +151,63 @@ samtools faidx hg38.fa
 
 # Align Nanopore reads to the reference genome
 minimap2 -ax splice -ub -t 24 -k 14 -w 4 --secondary=no hg38.fa tutorial.fastq.gz | \
-samtools sort -o tutorial.bam
+  samtools sort -o tutorial.bam
 
 # Define output directory
 outdir=nanoTS_result/
-
+##################################
+#### All-in-one step ####
+nanoTS full_pipeline \
+  --bam tutorial.bam \
+  --ref hg38.fa \
+  --model_unphased ../model/unphased_cDNA_nanopore_R104_HG002.pth \
+  --model_phased   ../model/phased_cDNA_nanopore_R104_HG002.pth \
+  --outdir $outdir \
+  --threads 24 \
+  --ALT 2 \
+  --total 2 \
+  --ratio 0.05 \
+  --depth 1000 \
+  --hap_qual 10
+##################################
+#### Separate steps ####
 # Step 1: Suffix each BAM alignment QNAME by count per read
-nanoTS bam -i tutorial.bam -o tutorial.qname.bam
+nanoTS bam \
+  -i tutorial.bam \
+  -o tutorial.qname.bam
 
 # Step 2: Unphased SNP calling
-nanoTS unphased_call --bam tutorial.qname.bam --ALT 2 --ratio 0.05 --ref hg38.fa --threads 24 --outdir $outdir --model ../model/unphased_cDNA_nanopore_R104_HG002.pth
+nanoTS unphased_call \
+  --bam tutorial.qname.bam \
+  --ref hg38.fa \
+  --threads 24 \
+  --ALT 2 \
+  --total 2 \
+  --ratio 0.05 \
+  --depth 1000 \
+  --outdir $outdir \
+  --model ../model/unphased_cDNA_nanopore_R104_HG002.pth
 
 # Step 3: Haplotype phasing
-nanoTS haplotype --vcf ${outdir}unphased_predict.pass.vcf --ref hg38.fa --bam tutorial.qname.bam --outdir $outdir
+nanoTS haplotype \
+  --vcf ${outdir}unphased_predict.pass.vcf \
+  --ref hg38.fa \
+  --bam tutorial.qname.bam \
+  --outdir $outdir \
+  --QUAL 10
 
 # Step 4: Phased SNP calling
-nanoTS phased_call --bam tutorial.qname.bam --ref hg38.fa --threads 24 --outdir $outdir --model ../model/phased_cDNA_nanopore_R104_HG002.pth
+nanoTS phased_call \
+  --bam tutorial.qname.bam \
+  --ref hg38.fa \
+  --threads 24 \
+  --depth 1000 \
+  --outdir $outdir \
+  --model ../model/phased_cDNA_nanopore_R104_HG002.pth
 
 # Step 5: Clean temporary files
-nanoTS clean --outdir $outdir
+nanoTS clean \
+  --outdir $outdir
 ```
 
 ---

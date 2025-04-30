@@ -28,28 +28,42 @@ logging.basicConfig(
     ]
 )
 
-def run_suffix_qname_by_alignment(bam_in_path, bam_out_path):
-    logging.info(f"Process BAM file {bam_in_path}")
+def run_suffix_qname_by_alignment(bam_in_path, bam_out_path, region=None):
+    """
+    Suffix each BAM alignment QNAME by a per-read counter, optionally restricting to a region.
+
+    Args:
+        bam_in_path (str): Path to input sorted & indexed BAM.
+        bam_out_path (str): Path to write the new BAM.
+        region (str, optional): Region string (e.g., "chr1" or "chr1:1000-2000").
+    """
+    logging.info(f"Processing BAM file: {bam_in_path}")
     if not os.path.exists(bam_in_path):
-        logging.error(f"Error: Required file {bam_in_path} does not exist.")
+        logging.error(f"Error: Required BAM does not exist: {bam_in_path}")
         sys.exit(1)
-    bam_in = pysam.AlignmentFile(bam_in_path, "rb")
+
+    # Open input & output, writing the same header
+    bam_in  = pysam.AlignmentFile(bam_in_path, "rb")
     bam_out = pysam.AlignmentFile(bam_out_path, "wb", template=bam_in)
 
     qname_counts = defaultdict(int)
 
-    for read in bam_in:
-        qname = read.query_name
-        qname_counts[qname] += 1
-        read.query_name = f"{qname}_{qname_counts[qname]}"
+    # Iterate through either the whole file or a specific region
+    iterator = bam_in.fetch(region=region) if region else bam_in.fetch()
+
+    for read in iterator:
+        original_qname = read.query_name
+        qname_counts[original_qname] += 1
+        read.query_name = f"{original_qname}_{qname_counts[original_qname]}"
         bam_out.write(read)
 
     bam_in.close()
     bam_out.close()
-    logging.info(f"Index BAM file {bam_out_path}")
-    # Index the new BAM
+
+    logging.info(f"Indexing output BAM: {bam_out_path}")
     pysam.index(bam_out_path)
-    logging.info("Done")
+    logging.info("Suffixing complete")
+
 
 def delete_related_files(outdir):
     """
@@ -254,6 +268,7 @@ def run_unphased_call(bam, ref, region, ALT, total, ratio, threads, depth, model
 
     if not matching_files:
         logging.info("No SNP candidates found")
+        sys.exit(1)
     else:
         # Run DNN prediction
         logging.info("Run DNN model")
@@ -274,6 +289,57 @@ def ensure_directory_exists(directory):
         os.makedirs(directory, exist_ok=True)
     else:
         logging.info(f"Directory '{directory}' already exists. Continuing...")
+        
+def run_full_pipeline(bam, ref, model_unphased, model_phased, outdir,
+                      threads, ALT, total, ratio, depth, hap_qual,region):
+    """
+    Full NanoTS pipeline from BAM to final phased VCF, then clean up.
+    """
+    logging.info("=== Starting full_pipeline ===")
+    ensure_directory_exists(outdir)
+    
+    # 1) Suffix QNAMEs
+    suffixed_bam = os.path.join(outdir, "suffix_qname.bam")
+    run_suffix_qname_by_alignment(bam, suffixed_bam,region)
+    
+    # 2) Unphased SNP calling
+    run_unphased_call(
+        bam=suffixed_bam,
+        ref=ref,
+        region=region,
+        ALT=ALT,
+        total=total,
+        ratio=ratio,
+        threads=threads,
+        depth=depth,
+        model=model_unphased,
+        outdir=outdir
+    )
+    
+    # 3) Haplotype phasing
+    unphased_vcf = os.path.join(outdir, "unphased_predict.pass.vcf")
+    run_haplotype(
+        vcf=unphased_vcf,
+        ref=ref,
+        bam=suffixed_bam,
+        outdir=outdir,
+        QUAL=hap_qual
+    )
+    
+    # 4) Phased SNP calling
+    run_phased_call(
+        bam=suffixed_bam,
+        ref=ref,
+        threads=threads,
+        depth=depth,
+        model=model_phased,
+        outdir=outdir
+    )
+    
+    # 5) Clean up
+    delete_related_files(outdir)
+    logging.info("=== full_pipeline complete ===")
+
 def parse_arguments():
     """
     Parse command-line arguments using argparse.
@@ -285,6 +351,7 @@ def parse_arguments():
     parser_bam = subparsers.add_parser("bam", help="Suffix each BAM alignment QNAME by count per read (e.g., read_1, read_2 for split reads).")
     parser_bam.add_argument("-i", "--input", required=True, help="Input sorted BAM file")
     parser_bam.add_argument("-o", "--output", required=True, help="Output BAM file with suffixed QNAMEs")
+    parser_bam.add_argument("--region", help="Region to process (e.g., chr1 or chr1:1000-2000).")
     
     # Subcommand: unphased_call
     parser_unphased = subparsers.add_parser("unphased_call", help="Run unphased variant calling")
@@ -333,12 +400,43 @@ def parse_arguments():
     parser_clean = subparsers.add_parser("clean", help="Delete all temporary files")
     parser_clean.add_argument("--outdir", required=True, help="Path to result directory.")
     
+    # Subcommand: full_pipeline
+    parser_full = subparsers.add_parser(
+        "full_pipeline",
+        help="Run the entire NanoTS pipeline starting from a BAM file."
+    )
+    parser_full.add_argument("--bam", required=True,
+                             help="Input sorted and indexed BAM file")
+    parser_full.add_argument("--ref", required=True,
+                             help="Reference genome FASTA file")
+    parser_full.add_argument("--model_unphased", required=True,
+                             help="Path to unphased model (.pth)")
+    parser_full.add_argument("--model_phased", required=True,
+                             help="Path to phased model (.pth)")
+    parser_full.add_argument("--outdir", required=True,
+                             help="Output directory for all steps")
+    parser_full.add_argument("--threads", type=int, default=24,
+                             help="Number of CPU threads (default: 24)")
+    parser_full.add_argument("--ALT", type=int, default=2,
+                             help="Minimum ALT coverage (default: 2)")
+    parser_full.add_argument("--total", type=int, default=2,
+                             help="Minimum total coverage (default: 2)")
+    parser_full.add_argument("--ratio", type=float, default=0.05,
+                             help="Minimum ALT allele frequency (default: 0.05)")
+    parser_full.add_argument("--depth", type=int, default=1000,
+                             help="Maximum reads per variant (0 = unlimited)")
+    parser_full.add_argument("--hap_qual", type=int, default=10,
+                             help="QUAL threshold for haplotype phasing (default: 10)")
+    parser_full.add_argument("--region", help="Region (e.g., chr1 or chr1:1000-2000)")
+
+
+    return parser.parse_args()
     return parser.parse_args()
 
 def main():
     args = parse_arguments()
     if args.command == "bam":
-        run_suffix_qname_by_alignment(args.input,args.output)  
+        run_suffix_qname_by_alignment(args.input,args.output,args.region)  
     elif args.command == "unphased_call":
         run_unphased_call(
             bam=args.bam,
@@ -362,14 +460,25 @@ def main():
         )
     elif args.command == "clean":
         delete_related_files(args.outdir)
+    elif args.command == "full_pipeline":
+        run_full_pipeline(
+            bam=args.bam,
+            ref=args.ref,
+            model_unphased=args.model_unphased,
+            model_phased=args.model_phased,
+            outdir=args.outdir,
+            threads=args.threads,
+            ALT=args.ALT,
+            total=args.total,
+            ratio=args.ratio,
+            depth=args.depth,
+            hap_qual=args.hap_qual,
+            region=args.region
+        )
     else:
         print("Invalid command")
         sys.exit(1)
         
-
- 
-
-
 
 if __name__ == "__main__":
     main()
