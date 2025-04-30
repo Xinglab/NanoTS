@@ -40,7 +40,7 @@ NanoTS is a command-line tool with the following subcommands:
 | **haplotype**    | Performs haplotype phasing using a VCF, reference, and BAM file. |
 | **phased_call**  | Processes phased SNP calls with the deep-learning model. |
 | **clean**        | Removes temporary files from the output directory.       |
-| **full_pipeline**        | One-in-all command. Include above all steps.       |
+| **full_pipeline**        | All-in-one command that includes all of the above steps. |
 
 ### **General Command Format**
 ```bash
@@ -69,7 +69,10 @@ Suffix each BAM alignment QNAME by count per read, e.g., read_1, read_2 for spli
 |------------|----------------------------------------------------|
 | `-i/--input`    | Input sorted BAM file.                      |
 | `-o/--output`    | Output BAM file with suffixed QNAMEs.                      |
-
+#### **Optional Arguments:**
+| Argument    | Default | Description                                               |
+|-------------|---------|-----------------------------------------------------------|
+| `--region`  | None    | Target region (`chr1` or `chr1:1000-2000`).              |
 
 ### **2️⃣ unphased_call**
 Extracts candidate variants and features for **deep learning-based SNP calling**.
@@ -106,6 +109,10 @@ Performs **haplotype phasing** using an input **VCF, reference genome, and BAM f
 | `--ref`    | Reference genome FASTA file.    |
 | `--bam`    | Input BAM file.                 |
 | `--outdir` | Output directory.               |
+#### **Optional Arguments:**
+| Argument    | Default | Description                                           |
+|-------------|---------|-------------------------------------------------------|
+| `--hap_qual`  | 10      | QUAL threshold to filter SNPs during haplotype phasing.       |
 
 ---
 
@@ -138,6 +145,30 @@ Removes **temporary files** in the output folder.
 
 ---
 
+### **6️⃣ full_pipeline**
+Runs the **entire NanoTS pipeline** from a BAM file through final phased VCF output, then cleans up intermediate files.  
+
+#### **Required Arguments:**
+| Argument             | Description                                                   |
+|----------------------|---------------------------------------------------------------|
+| `--bam`              | Input sorted & indexed BAM file.                              |
+| `--ref`              | Reference genome FASTA file.                                 |
+| `--model_unphased`   | Path to unphased model (`.pth` file).                         |
+| `--model_phased`     | Path to phased model (`.pth` file).                           |
+| `--outdir`           | Output directory for all steps.                               |
+
+#### **Optional Arguments:**
+| Argument      | Default | Description                                                   |
+|---------------|---------|---------------------------------------------------------------|
+| `--region`    | None    | Target region (e.g., `chr1` or `chr1:1000-2000`).             |
+| `--threads`   | 24      | Number of CPU threads.                                        |
+| `--ALT`       | 2       | Minimum ALT SNP coverage.                                     |
+| `--total`     | 2       | Minimum total base coverage.                                  |
+| `--ratio`     | 0.05    | Minimum ALT allele frequency.                                 |
+| `--depth`     | 1000    | Maximum reads per variant (`0` to disable limit).             |
+| `--hap_qual`  | 10      | QUAL threshold to filter SNPs during haplotype phasing.       |
+
+---
 ## **Example Workflow**
 Here’s an end-to-end example using **NanoTS**:
 
