@@ -63,7 +63,7 @@ NanoTS uses pre-trained models for SNP calling:
 
 ## **Subcommands & Arguments**
 ### **1️⃣ bam**
-Suffix each BAM alignment QNAME by count per read, e.g., read_1, read_2 for split reads.
+Append a numeric suffix to each BAM alignment QNAME based on its count per read, ensuring each alignment has a unique QNAME (e.g., read_1, read_2).
 #### **Required Arguments:**
 | Argument   | Description                                        |
 |------------|----------------------------------------------------|
