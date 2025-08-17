@@ -250,6 +250,29 @@ nanoTS clean \
   --outdir $outdir
 ```
 
+Run NanoTS with Singularity (always bind host folders you read/write)
+```
+cd example/
+
+SIF=../../../nanots_latest.sif # use your SIF path
+EXAMPLE_DIR="$(pwd)"
+MODEL_DIR="$(cd ../model && pwd)"   # the model folder in this repository. Adjust if your model files live elsewhere
+
+OUTDIR="$EXAMPLE_DIR/nanoTS_result"
+mkdir -p "$OUTDIR"
+
+# Bind BOTH the data dir and the model dir so the container can see them.
+singularity exec -B "$EXAMPLE_DIR","$MODEL_DIR" "$SIF" \
+  /opt/conda/envs/nanoTS/bin/nanoTS full_pipeline \
+    --bam "$EXAMPLE_DIR/tutorial.bam" \
+    --ref "$EXAMPLE_DIR/hg38.fa" \
+    --model_unphased "$MODEL_DIR/unphased_cDNA_nanopore_R104_HG002.pth" \
+    --model_phased  "$MODEL_DIR/phased_cDNA_nanopore_R104_HG002.pth" \
+    --outdir "$OUTDIR" \
+    --threads 24 \
+    --ALT 2 --total 2 --ratio 0.05 --depth 1000 --hap_qual 10
+```
+
 ---
 
 ## **Output Files**
