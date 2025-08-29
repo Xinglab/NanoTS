@@ -5,7 +5,7 @@
 ---
 
 ## **Installation**
-
+**Note**: NanoTS is currently supported **only on Linux systems**.
 ### Option 1: Conda
 Ensure you have **Conda** installed, then create and activate the `nanoTS` environment:
 
