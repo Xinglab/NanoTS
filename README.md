@@ -192,7 +192,7 @@ samtools faidx hg38.fa
 # Align Nanopore reads to the reference genome
 minimap2 -ax splice -ub -t 24 -k 14 -w 4 --secondary=no hg38.fa tutorial.fastq.gz | \
   samtools sort -o tutorial.bam
-
+samtools index tutorial.bam
 # Define output directory
 outdir=nanoTS_result/
 ##################################
