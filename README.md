@@ -179,7 +179,7 @@ Runs the **entire NanoTS pipeline** from a BAM file through final phased VCF out
 
 ---
 ## **Example Workflow**
-Here’s an end-to-end example using **NanoTS**:
+Here’s an end-to-end example using **NanoTS**. The run takes about 5 minutes and requires at least 23 GB of memory.
 
 ```bash
 cd example/
@@ -191,7 +191,7 @@ samtools faidx hg38.fa
 
 # Align Nanopore reads to the reference genome
 minimap2 -ax splice -ub -t 24 -k 14 -w 4 --secondary=no hg38.fa tutorial.fastq.gz | \
-  samtools sort -o tutorial.bam
+  samtools sort -o tutorial.bam # Note: requires at least 23 GB of memory
 samtools index tutorial.bam
 # Define output directory
 outdir=nanoTS_result/
