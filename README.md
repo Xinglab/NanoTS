@@ -12,14 +12,14 @@ Ensure you have **Conda** installed, then create and activate the `nanoTS` envir
 ```bash
 git clone git@github.com:Xinglab/NanoTS.git # clone nanoTS
 cd NanoTS
-conda env create -f environment.yml # create nanoTS conda environment
+conda env create -f environment.yml # create the nanoTS environment (this step may take a while due to dependency solving)
 conda activate nanoTS
 ```
 
 Install `nanoTS`:
 
 ```bash
-pip install .
+pip install . # installs in ~5 seconds
 ```
 
 Alternatively, run the NanoTS runner directly:
@@ -28,7 +28,7 @@ Alternatively, run the NanoTS runner directly:
 python ./source/nanoTS-runner.py [OPTIONS]
 ```
 ### Option 2: Singularity
-Ensure you have **Singularity** installed, then pull the `nanoTS` container:
+Ensure you have **Singularity** installed, then pull the `nanoTS` container to use it instantly without installation:
 
 ```bash
 singularity pull library://zelinliu/nanots/nanots:latest
