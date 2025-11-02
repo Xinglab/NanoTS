@@ -42,8 +42,8 @@ singularity pull library://zelinliu/nanots/nanots:latest
 
 | Platform        | Library            | Chemistry            | Model (unphased)                             | Model (phased)                             |
 | --------------- | ------------------ | -------------------- | -------------------------------------------- | ------------------------------------------ |
-| ONT             | cDNA               | R10.4             | `unphased_cDNA_nanopore_R104_HG002.pth`      | `phased_cDNA_nanopore_R104_HG002.pth`      |
-| ONT             | direct RNA         | R10.4                | `unphased_dRNA_nanopore_R104_HG002.pth`      | `phased_dRNA_nanopore_R104_HG002.pth`      |
+| ONT             | cDNA               | R10.4.1             | `unphased_cDNA_nanopore_R104_HG002.pth`      | `phased_cDNA_nanopore_R104_HG002.pth`      |
+| ONT             | direct RNA         | R10.4.1                | `unphased_dRNA_nanopore_R104_HG002.pth`      | `phased_dRNA_nanopore_R104_HG002.pth`      |
 | PacBio Revio | cDNA (MAS-seq) | HiFi (CCS), MAS-seq | `unphased_MASseq_PacBio_Revio_HG002.pth` | `phased_MASseq_PacBio_Revio_HG002.pth` |
 
 > **Tip:** Choose the model that matches your **platform** (ONT vs PacBio), **library type** (cDNA vs dRNA), and **pipeline stage** (unphased vs phased).
