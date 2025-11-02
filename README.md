@@ -12,7 +12,7 @@
 Ensure you have **Conda** installed, then create and activate the `nanoTS` environment:
 
 ```bash
-git clone git@github.com:Xinglab/NanoTS.git # clone nanoTS
+git clone git@github.com:Xinglab/NanoTS.git # or git clone https://github.com/Xinglab/NanoTS.git
 cd NanoTS
 conda env create -f environment.yml # create the nanoTS environment (take ~1 minute due to dependency resoltuion)
 conda activate nanoTS
