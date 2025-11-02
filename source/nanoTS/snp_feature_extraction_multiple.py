@@ -663,9 +663,6 @@ def extract_VCF_feature(vcf_file, bam_file, reference_file, num_processes,read_d
     widgets = ['Extract SNV features: ', progressbar.Percentage(), ' ', progressbar.Bar(marker='=', left='[', right=']'), ' ', progressbar.ETA()]
     bar = progressbar.ProgressBar(widgets=widgets, maxval=len(tasks)).start()
 
-    # Batch processing
-    batch_size = 20 * num_processes  # Tune this based on the workload and threads
-    
 
     with Pool(processes=num_processes) as pool:
         all_results = []

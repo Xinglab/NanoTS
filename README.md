@@ -1,7 +1,9 @@
 # **NanoTS**
 
-**NanoTS** is a deep-learning-based variant caller for SNP detection from Nanopore transcriptome sequencing data. It provides efficient and accurate SNP calling from **long-read Nanopore RNA sequencing data**, supporting both **cDNA and direct RNA** technologies, particularly with the latest **R10.4 chemistry**.
+**NanoTS** is a deep-learning variant caller for SNP detection from **long-read transcriptome sequencing**. It supports both **Oxford Nanopore (ONT)** and **PacBio** platforms, with pretrained models for each technology and library type.
 
+* **ONT:** cDNA and direct RNA (R10.4+)
+* **PacBio:** **HiFi MAS-seq** cDNA (Revio)
 ---
 
 ## **Installation**
@@ -34,6 +36,17 @@ Ensure you have **Singularity** installed, then pull the `nanoTS` container to u
 singularity pull library://zelinliu/nanots/nanots:latest
 
 ```
+---
+
+## **Supported platforms & models**
+
+| Platform        | Library            | Chemistry            | Model (unphased)                             | Model (phased)                             |
+| --------------- | ------------------ | -------------------- | -------------------------------------------- | ------------------------------------------ |
+| ONT             | cDNA               | R10.4             | `unphased_cDNA_nanopore_R104_HG002.pth`      | `phased_cDNA_nanopore_R104_HG002.pth`      |
+| ONT             | direct RNA         | R10.4                | `unphased_dRNA_nanopore_R104_HG002.pth`      | `phased_dRNA_nanopore_R104_HG002.pth`      |
+| PacBio Revio | cDNA (MAS-seq) | HiFi (CCS), MAS-seq | `unphased_MASseq_PacBio_Revio_HG002.pth` | `phased_MASseq_PacBio_Revio_HG002.pth` |
+
+> **Tip:** Choose the model that matches your **platform** (ONT vs PacBio), **library type** (cDNA vs dRNA), and **pipeline stage** (unphased vs phased).
 
 
 ---
@@ -55,18 +68,6 @@ NanoTS is a command-line tool with the following subcommands:
 ```bash
 nanoTS <subcommand> [OPTIONS]
 ```
-
----
-
-## **Models**
-NanoTS uses pre-trained models for SNP calling:
-
-| Model Name                                | Description                          |
-|-------------------------------------------|--------------------------------------|
-| `unphased_cDNA_nanopore_R104_HG002.pth`   | Unphased SNP model for cDNA |
-| `unphased_dRNA_nanopore_R104_HG002.pth`   | Unphased SNP model for direct RNA   |
-| `phased_cDNA_nanopore_R104_HG002.pth`     | Phased SNP model for cDNA  |
-| `phased_dRNA_nanopore_R104_HG002.pth`     | Phased SNP model for direct RNA     |
 
 ---
 

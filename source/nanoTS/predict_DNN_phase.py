@@ -411,7 +411,7 @@ def extract_read_end(test_dist_value):
 
     return out_list
 
-def organize_variant_phase(raw_list,h1_list,h2_list,variant_df,model):
+def organize_variant_phase(raw_list,h1_list,h2_list,variant_df,model,FET_enable):
     R_one_hot_seq, R_ref_frac_fwd, R_ref_frac_rev, R_alt_frac_fwd, R_alt_frac_rev, R_ref_cov_fwd, R_ref_cov_rev, R_alt_cov_fwd, R_alt_cov_rev,R_total_frac,R_base_entropy,R_dist_value,R_coverage,R_ref_nearest_snvs_fractions_forward,R_ref_nearest_snvs_fractions_reverse,R_alt_nearest_snvs_fractions_forward,R_alt_nearest_snvs_fractions_reverse  = prepare_data(raw_list)
     H1_one_hot_seq, H1_ref_frac_fwd, H1_ref_frac_rev, H1_alt_frac_fwd, H1_alt_frac_rev, H1_ref_cov_fwd, H1_ref_cov_rev, H1_alt_cov_fwd, H1_alt_cov_rev,H1_total_frac,H1_base_entropy,H1_dist_value,H1_coverage,H1_ref_nearest_snvs_fractions_forward,H1_ref_nearest_snvs_fractions_reverse,H1_alt_nearest_snvs_fractions_forward,H1_alt_nearest_snvs_fractions_reverse = prepare_data(h1_list)
     H2_one_hot_seq, H2_ref_frac_fwd, H2_ref_frac_rev, H2_alt_frac_fwd, H2_alt_frac_rev, H2_ref_cov_fwd, H2_ref_cov_rev, H2_alt_cov_fwd, H2_alt_cov_rev,H2_total_frac,H2_base_entropy,H2_dist_value,H2_coverage,H2_ref_nearest_snvs_fractions_forward,H2_ref_nearest_snvs_fractions_reverse,H2_alt_nearest_snvs_fractions_forward,H2_alt_nearest_snvs_fractions_reverse = prepare_data(h2_list)
@@ -435,20 +435,20 @@ def organize_variant_phase(raw_list,h1_list,h2_list,variant_df,model):
         pred_genotype = torch.argmax(pred_genotype_prob, dim=1).numpy()
         pred_genotype_prob= pred_genotype_prob.numpy()
 
+    if FET_enable:
+        #homo_alt_idx = (pred_genotype == 2) & (pred_genotype_prob[:, 2] < 0.9) & (pred_genotype_prob[:, 1] >pred_genotype_prob[:, 0])
+        homo_alt_idx = (pred_genotype == 2)  & (pred_genotype_prob[:, 1] >pred_genotype_prob[:, 0])   
+        homo_alt_p_value = adjust_homo_alt(h1_list, h2_list, np.where(homo_alt_idx)[0])
 
-    #homo_alt_idx = (pred_genotype == 2) & (pred_genotype_prob[:, 2] < 0.9) & (pred_genotype_prob[:, 1] >pred_genotype_prob[:, 0])
-    homo_alt_idx = (pred_genotype == 2)  & (pred_genotype_prob[:, 1] >pred_genotype_prob[:, 0])   
-    homo_alt_p_value = adjust_homo_alt(h1_list, h2_list, np.where(homo_alt_idx)[0])
+        # Update genotype predictions where p-value < 0.00001
+        update_indices = np.where(homo_alt_idx)[0][np.array(homo_alt_p_value) < 0.00001]
 
-    # Update genotype predictions where p-value < 0.01
-    update_indices = np.where(homo_alt_idx)[0][np.array(homo_alt_p_value) < 0.00001]
-
-    #print(update_indices)
-    pred_genotype[update_indices] = 1
-    
-    orig_g2=pred_genotype_prob[update_indices,2].copy()
-    pred_genotype_prob[update_indices,2]=pred_genotype_prob[update_indices,1]
-    pred_genotype_prob[update_indices,1]=orig_g2
+        #print(update_indices)
+        pred_genotype[update_indices] = 1
+        
+        orig_g2=pred_genotype_prob[update_indices,2].copy()
+        pred_genotype_prob[update_indices,2]=pred_genotype_prob[update_indices,1]
+        pred_genotype_prob[update_indices,1]=orig_g2
     #print(predictions)
     # Save predictions
     predicted_snv_labels = (pred_genotype != 0).astype(int)  # 1 if genotype is 1 or 2, else 0
@@ -475,7 +475,7 @@ def organize_variant_phase(raw_list,h1_list,h2_list,variant_df,model):
     variant_df = variant_df.reset_index(drop=True)
     return(variant_df)
     
-def run_predict_dnn_phase(raw_pkl,h1_pkl,h2_pkl,variant_file,model_path,output_file,bam_path,target_chr=[]):
+def run_predict_dnn_phase(raw_pkl,h1_pkl,h2_pkl,variant_file,model_path,output_file,bam_path,target_chr=[],FET_enable=True):
     if bam_path:
         bam = pysam.AlignmentFile(bam_path, "rb")
         contigs = {ref["SN"]: ref["LN"] for ref in bam.header["SQ"]}
@@ -512,7 +512,7 @@ def run_predict_dnn_phase(raw_pkl,h1_pkl,h2_pkl,variant_file,model_path,output_f
             # Prepare data
             print(f'Predicting {len(raw_list)} SNVs')
             if len(raw_list)>0:
-                variant_df_each=organize_variant_phase(raw_list,h1_list,h2_list,variant_df_each,model)
+                variant_df_each=organize_variant_phase(raw_list,h1_list,h2_list,variant_df_each,model,FET_enable)
                 variant_df_list.append(variant_df_each)
         variant_df = pd.concat(variant_df_list, axis=0, ignore_index=True)
     else:
@@ -527,7 +527,7 @@ def run_predict_dnn_phase(raw_pkl,h1_pkl,h2_pkl,variant_file,model_path,output_f
         # Prepare data
         print(f'Predicting {len(raw_list)} SNVs')
         if len(raw_list)>0:
-            variant_df=organize_variant_phase(raw_list,h1_list,h2_list,variant_df,model)
+            variant_df=organize_variant_phase(raw_list,h1_list,h2_list,variant_df,model,FET_enable)
             
     variant_df.to_csv(output_file, index=False, sep='\t')
     variant_df_pass=variant_df.loc[variant_df.Result_genotype>0,:]
@@ -553,8 +553,11 @@ if __name__ == "__main__":
     parser.add_argument("--model_path", type=str, required=True, help="Path to the phased model .pth file")
     parser.add_argument("--output_file", type=str, required=True, help="Path to save the predictions in .txt format")
     parser.add_argument("--bam", type=str, required=False, help="Path to the alignment file")
+    parser.add_argument("--no-FET", dest="FET", action="store_false", help="Disable FET adjustment for homo var to heter var (default: FET enabled)")
+    parser.set_defaults(FET=True)
+
     args = parser.parse_args()
 
-    run_predict_dnn_phase(args.raw_pkl,args.h1_pkl,args.h2_pkl,args.variant_file,args.model_path,args.output_file,args.bam)
+    run_predict_dnn_phase(args.raw_pkl,args.h1_pkl,args.h2_pkl,args.variant_file,args.model_path,args.output_file,args.bam,[],args.FET)
 
 
