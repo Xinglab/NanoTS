@@ -127,7 +127,7 @@ Performs haplotype phasing using an input VCF, reference genome, and BAM file.
 ---
 
 ### **4️⃣ phased_call**
-Extracts features from H1 & H2 BAM and performs phased DL calling.
+Extracts features from H1 & H2 BAM and performs phased deep learning-based SNP calling.
 
 #### **Required Arguments:**
 | Argument   | Description                        |
