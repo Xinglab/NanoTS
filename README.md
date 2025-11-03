@@ -95,17 +95,17 @@ Append a numeric suffix to each BAM alignment QNAME based on its count per read,
 | `--bam`    | Sorted and indexed BAM file.                      |
 | `--ref`    | Reference genome FASTA file.                      |
 | `--outdir` | Output directory.                                 |
-| `--model`  | Pre-trained model (`.pth` file).                 |
+| `--model`  | Pre-trained unphased model (`.pth` file).                 |
 
 #### **Optional Arguments:**
 | Argument    | Default | Description                                               |
 |-------------|---------|-----------------------------------------------------------|
 | `--threads` | 24      | Number of CPU threads.                                    |
-| `--region`  | None    | Target region (`chr1` or `chr1:1000-2000`).              |
-| `--ALT`     | 2       | Minimum ALT SNP coverage.                                |
-| `--total`   | 2       | Minimum total base coverage.                             |
-| `--ratio`   | 0.05    | Minimum ALT allele frequency.                            |
-| `--depth`   | 1000    | Maximum reads per variant (`0` to disable limit).       |
+| `--region`  | None    | Target region for analysis (`chr1` or `chr1:1000-2000`).              |
+| `--ALT`     | 2       | Minimum number of reads supporting the ALT allele.                                |
+| `--total`   | 2       | Minimum total read coverage required at a variant site.   |
+| `--ratio`   | 0.05    | Minimum proportion of ALT reads relative to total coverage.  |
+| `--depth`   | 1000    | Maximum number of reads sampled per variant (`0` to disable limit).       |
 
 🔹 **Note:** Increasing `--ALT` and `--total` thresholds may affect haplotype inference efficiency.
 
@@ -137,7 +137,7 @@ Extracts features from H1 & H2 BAM and performs phased deep learning-based SNP c
 | `--bam`    | Sorted and indexed BAM file.      |
 | `--ref`    | Reference genome FASTA file.      |
 | `--outdir` | Output directory.                 |
-| `--model`  | Pre-trained model (`.pth` file). |
+| `--model`  | Pre-trained phased model (`.pth` file). |
 
 #### **Optional Arguments:**
 | Argument    | Default | Description                                           |
@@ -172,12 +172,12 @@ Runs the entire NanoTS pipeline from a BAM file through final phased VCF output,
 #### **Optional Arguments:**
 | Argument      | Default | Description                                                   |
 |---------------|---------|---------------------------------------------------------------|
-| `--region`    | None    | Target region (e.g., `chr1` or `chr1:1000-2000`).             |
-| `--threads`   | 24      | Number of CPU threads.                                        |
-| `--ALT`       | 2       | Minimum ALT SNP coverage.                                     |
-| `--total`     | 2       | Minimum total base coverage.                                  |
-| `--ratio`     | 0.05    | Minimum ALT allele frequency.                                 |
-| `--depth`     | 1000    | Maximum reads per variant (`0` to disable limit).             |
+| `--threads` | 24      | Number of CPU threads.                                    |
+| `--region`  | None    | Target region for analysis (`chr1` or `chr1:1000-2000`).              |
+| `--ALT`     | 2       | Minimum number of reads supporting the ALT allele.                                |
+| `--total`   | 2       | Minimum total read coverage required at a variant site.   |
+| `--ratio`   | 0.05    | Minimum proportion of ALT reads relative to total coverage.  |
+| `--depth`   | 1000    | Maximum number of reads sampled per variant (`0` to disable limit).       |
 | `--hap_qual`  | 10      | QUAL threshold to filter SNPs during haplotype phasing.       |
 
 ---
