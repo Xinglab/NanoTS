@@ -158,7 +158,7 @@ Removes temporary files in the output folder.
 ---
 
 ### **6️⃣ full_pipeline**
-Runs the entire NanoTS pipeline from a BAM file through final phased VCF output, then cleans up intermediate files.  
+Runs the entire NanoTS pipeline from a BAM file through final phased VCF output, then cleans up intermediate files.
 
 #### **Required Arguments:**
 | Argument             | Description                                                   |
