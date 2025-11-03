@@ -84,6 +84,8 @@ Append a numeric suffix to each BAM alignment QNAME based on its count per read,
 |-------------|---------|-----------------------------------------------------------|
 | `--region`  | None    | Target region (`chr1` or `chr1:1000-2000`).              |
 
+---
+
 ### **2️⃣ unphased_call**
  Extracts SNP candidates + features from unphased BAM and performs unphased deep learning-based SNP calling.
 
