@@ -57,10 +57,10 @@ NanoTS is a command-line tool with the following subcommands:
 
 | Subcommand       | Description                                              |
 |------------------|----------------------------------------------------------|
-| **bam**          | Suffix each BAM alignment QNAME by count per read. |
-| **unphased_call** | Extracts candidate SNPs and features from a BAM file.   |
+| **bam**          | Appends a numeric suffix to each BAM alignment QNAME to ensure uniqueness. |
+| **unphased_call** | Extracts SNP candidates + features from unphased BAM and performs unphased DL calling.   |
 | **haplotype**    | Performs haplotype phasing using a VCF, reference, and BAM file. |
-| **phased_call**  | Processes phased SNP calls with the deep-learning model. |
+| **phased_call**  | Extracts features from H1 & H2 BAM and performs phased DL calling. |
 | **clean**        | Removes temporary files from the output directory.       |
 | **full_pipeline**        | All-in-one command that includes all of the above steps. |
 
@@ -85,7 +85,7 @@ Append a numeric suffix to each BAM alignment QNAME based on its count per read,
 | `--region`  | None    | Target region (`chr1` or `chr1:1000-2000`).              |
 
 ### **2️⃣ unphased_call**
-Extracts candidate variants and features for **deep learning-based SNP calling**.
+ Extracts SNP candidates + features from unphased BAM and performs unphased deep learning-based SNP calling.
 
 #### **Required Arguments:**
 | Argument   | Description                                        |
@@ -110,7 +110,7 @@ Extracts candidate variants and features for **deep learning-based SNP calling**
 ---
 
 ### **3️⃣ haplotype**
-Performs **haplotype phasing** using an input **VCF, reference genome, and BAM file**.
+Performs haplotype phasing using an input VCF, reference genome, and BAM file.
 
 #### **Required Arguments:**
 | Argument   | Description                      |
@@ -127,7 +127,7 @@ Performs **haplotype phasing** using an input **VCF, reference genome, and BAM f
 ---
 
 ### **4️⃣ phased_call**
-Processes **phased variant calls** using the deep-learning model.
+Extracts features from H1 & H2 BAM and performs phased DL calling.
 
 #### **Required Arguments:**
 | Argument   | Description                        |
@@ -146,7 +146,7 @@ Processes **phased variant calls** using the deep-learning model.
 ---
 
 ### **5️⃣ clean**
-Removes **temporary files** in the output folder.
+Removes temporary files in the output folder.
 
 #### **Required Arguments:**
 | Argument   | Description                  |
@@ -156,7 +156,7 @@ Removes **temporary files** in the output folder.
 ---
 
 ### **6️⃣ full_pipeline**
-Runs the **entire NanoTS pipeline** from a BAM file through final phased VCF output, then cleans up intermediate files.  
+Runs the entire NanoTS pipeline from a BAM file through final phased VCF output, then cleans up intermediate files.  
 
 #### **Required Arguments:**
 | Argument             | Description                                                   |
@@ -180,7 +180,7 @@ Runs the **entire NanoTS pipeline** from a BAM file through final phased VCF out
 
 ---
 ## **Example Workflow**
-Here’s an end-to-end example using **NanoTS**. The run takes about 5 minutes and requires at least 23 GB of memory.
+Here’s an end-to-end example using NanoTS. The run takes about 5 minutes and requires at least 23 GB of memory.
 
 ```bash
 cd example/
