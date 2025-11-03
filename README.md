@@ -71,7 +71,7 @@ nanoTS <subcommand> [OPTIONS]
 
 ---
 
-## **Subcommands & Arguments**
+## **Subcommands & arguments**
 ### **1️⃣ bam**
 Append a numeric suffix to each BAM alignment QNAME based on its count per read, ensuring each alignment has a unique QNAME (e.g., read_1, read_2).
 #### **Required Arguments:**
