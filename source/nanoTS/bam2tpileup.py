@@ -103,6 +103,14 @@ def parse_pileup(input_stream, mismath_min=5, total_min=10, ratio_min=0.05, epsi
         if alt_count > 0:
             max_alt_index = four_base_reads.index(alt_count)
             alt = ['A', 'T', 'C', 'G'][max_alt_index]
+            # new code 11/11/2025; get all max ALT
+            max_alt_indices = [i for i, x in enumerate(four_base_reads) if x == alt_count]
+            if deletions == alt_count:
+                max_alt_indices.append(4)
+            if insertions == alt_count:
+                max_alt_indices.append(5)
+            alts = [base for i, base in enumerate(['A', 'T', 'C', 'G','DEL','INS']) if i in max_alt_indices]
+
         else:
             alt = 'N'  # No alternate base
 
@@ -136,7 +144,7 @@ def parse_pileup(input_stream, mismath_min=5, total_min=10, ratio_min=0.05, epsi
                     str(field) for field in [
                         chrom, pos, ref_base.upper(), alt,
                         ref_count, alt_count, ratio1,
-                        lambda_1, LLR1, ratio2, lambda_2, LLR2
+                        lambda_1, LLR1, ratio2, lambda_2, LLR2 , ','.join(alts)
                     ]
                 ]))
     #for each in results:
@@ -198,7 +206,7 @@ def process_bam(bam_path, ref_path, region=None, mismatch=5, total=10, ratio=0.0
     chrom_lengths = {ref["SN"]: ref["LN"] for ref in bam.header["SQ"]}
     bam.close()
     headline='\t'.join([str(i) for i in ["chrom", "pos", "ref", "alt", "ref_reads", "alt_reads", "ratio_1", "lambda_1", "LLR_1",
-                         "ratio_2", "lambda_2", "LLR_2"]])
+                         "ratio_2", "lambda_2", "LLR_2",'alt_tie']])
     # Combine and write results to stdout
     sys.stdout.write(
        headline+'\n'
