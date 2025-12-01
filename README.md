@@ -9,26 +9,25 @@
 ## **Installation**
 **Note**: NanoTS is currently supported **only on Linux systems**.
 ### Option 1: Conda
-Ensure you have **Conda** installed, then create and activate the `nanoTS` environment:
+Ensure you have **Conda** installed, then create and activate the **nanoTS** environment and install **nanoTS**:
 
 ```bash
-git clone git@github.com:Xinglab/NanoTS.git # or git clone https://github.com/Xinglab/NanoTS.git
+git clone git@github.com:Xinglab/NanoTS.git     # or: git clone https://github.com/XingGitHub/NanoTS.git
 cd NanoTS
-conda env create -f environment.yml # create the nanoTS environment (take ~1 minute due to dependency resoltuion)
+conda env create -f environment.yml             # create the nanoTS environment (takes ~1 minute)
 conda activate nanoTS
+
+# Install nanoTS in this conda environment:
+pip install .                                    # installs in ~5 seconds
 ```
 
-Install `nanoTS`:
-
-```bash
-pip install . # installs in ~5 seconds
-```
-
-Alternatively, run the NanoTS runner directly:
+Alternatively, after activating the **nanoTS** environment, run the NanoTS runner directly:
 
 ```bash
 python ./source/nanoTS-runner.py [OPTIONS]
 ```
+
+
 ### Option 2: Singularity
 Ensure you have **Singularity** installed, then pull the `nanoTS` container to use it instantly without installation:
 
