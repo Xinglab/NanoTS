@@ -37,7 +37,7 @@ singularity pull library://zelinliu/nanots/nanots:latest
 ```
 ---
 
-## **Supported platforms & models**
+## **Supported Platforms & Models**
 
 | Platform        | Library            | Chemistry            | Model (unphased)                             | Model (phased)                             |
 | --------------- | ------------------ | -------------------- | -------------------------------------------- | ------------------------------------------ |
@@ -70,7 +70,7 @@ nanoTS <subcommand> [OPTIONS]
 
 ---
 
-## **Subcommands & arguments**
+## **Subcommands & Arguments**
 ### **1️⃣ bam**
 Append a numeric suffix to each BAM alignment QNAME based on its count per read, ensuring each alignment has a unique QNAME (e.g., read_1, read_2).
 #### **Required Arguments:**
