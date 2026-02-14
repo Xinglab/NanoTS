@@ -1,6 +1,6 @@
 # **NanoTS**
 
-**NanoTS** is a deep-learning variant caller for SNP detection from **long-read transcriptome sequencing**. It supports both **Oxford Nanopore (ONT)** and **PacBio** platforms, with pretrained models for each technology and library type.
+**NanoTS** is a deep-learning variant caller for SNP detection from **long-read transcriptome sequencing**. It supports both **Oxford Nanopore (ONT)** and **Pacific Biosciences (PacBio)** platforms, with pretrained models for each technology and library type.
 
 * **ONT:** cDNA and direct RNA (R10.4.1)
 * **PacBio:** HiFi MAS-seq cDNA
