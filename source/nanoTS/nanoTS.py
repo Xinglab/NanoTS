@@ -362,7 +362,7 @@ def parse_arguments():
     parser_unphased.add_argument("--region", help="Region to process (e.g., chr1 or chr1:1000-2000).")
     parser_unphased.add_argument("--ALT", type=int, default=2, help="Minimum ALT SNP coverage (default: 2).")
     parser_unphased.add_argument("--total", type=int, default=2, help="Minimum total base coverage (default: 2).")
-    parser_unphased.add_argument("--ratio", type=float, default=0.05, help="Minimum ratio of ALT SNV (default: 0.05).")
+    parser_unphased.add_argument("--ratio", type=float, default=0.05, help="Minimum ALT allele fraction (default: 0.05).")
     parser_unphased.add_argument("--depth", type=int, default=1000, help="Maximum reads to load for each variant. Set 0 to remove the limit (default: 1000).")
     parser_unphased.add_argument("--model", required=True, help="Path to the saved model .pth file.")
 
@@ -422,7 +422,7 @@ def parse_arguments():
     parser_full.add_argument("--total", type=int, default=2,
                              help="Minimum total coverage (default: 2)")
     parser_full.add_argument("--ratio", type=float, default=0.05,
-                             help="Minimum ALT allele frequency (default: 0.05)")
+                             help="Minimum ALT allele fraction (default: 0.05)")
     parser_full.add_argument("--depth", type=int, default=1000,
                              help="Maximum reads per variant (0 = unlimited)")
     parser_full.add_argument("--hap_qual", type=int, default=10,
