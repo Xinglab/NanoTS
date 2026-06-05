@@ -296,22 +296,6 @@ All results are stored in the specified **`--outdir`** directory.
 
 ---
 
-## **Computational Resource Requirements**
-
-The runtime and memory usage of **NanoTS** scale with the number of variant sites analyzed.
-
-For the **whole-transcriptome ONT cDNA dataset** used in this study:
-
-* **Default settings:** ~126 GB peak memory and ~21 hours of runtime.
-* **With `--ALT 5`:** ~21 GB peak memory and ~8 hours of runtime.
-
-For the **whole-transcriptome ONT dRNA dataset** used in this study:
-
-* **Default settings:** ~14 GB peak memory and ~6 hours of runtime.
-* **With `--ALT 5`:** ~7 GB peak memory and ~5 hours of runtime.
-
----
-
 ## **License**
 This project is licensed under the **GPL-3.0 License**. See the [LICENSE](LICENSE) file for details.
 
