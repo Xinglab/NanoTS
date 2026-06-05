@@ -23,6 +23,19 @@ warnings.filterwarnings("ignore")
 
 import math
 import pysam
+import glob
+
+
+def load_feature_values(feature_prefix):
+    shard_files = sorted(glob.glob(feature_prefix + '.shard*.pkl'))
+    if not shard_files:
+        shard_files = [feature_prefix]
+
+    values = []
+    for shard_file in shard_files:
+        with open(shard_file, "rb") as file:
+            values.extend(pickle.load(file).values())
+    return values
 
 from scipy.stats import fisher_exact
 
@@ -500,12 +513,9 @@ def run_predict_dnn_phase(raw_pkl,h1_pkl,h2_pkl,variant_file,model_path,output_f
             print(f'Start processing chr{i}')
             chrom=f'.chr{i}'
             # Load input data
-            with open(raw_pkl+chrom, "rb") as file:
-                raw_list = list(pickle.load(file).values())
-            with open(h1_pkl+chrom, "rb") as file:
-                h1_list = list(pickle.load(file).values())
-            with open(h2_pkl+chrom, "rb") as file:
-                h2_list = list(pickle.load(file).values())
+            raw_list = load_feature_values(raw_pkl+chrom)
+            h1_list = load_feature_values(h1_pkl+chrom)
+            h2_list = load_feature_values(h2_pkl+chrom)
             # Load variant DataFrame
             variant_df_each = pd.read_csv(variant_file+chrom, sep='\t')
 
@@ -517,12 +527,9 @@ def run_predict_dnn_phase(raw_pkl,h1_pkl,h2_pkl,variant_file,model_path,output_f
         variant_df = pd.concat(variant_df_list, axis=0, ignore_index=True)
     else:
         print(f'Start processing')
-        with open(raw_pkl, "rb") as file:
-            raw_list = list(pickle.load(file).values())
-        with open(h1_pkl, "rb") as file:
-            h1_list = list(pickle.load(file).values())
-        with open(h2_pkl, "rb") as file:
-            h2_list = list(pickle.load(file).values())
+        raw_list = load_feature_values(raw_pkl)
+        h1_list = load_feature_values(h1_pkl)
+        h2_list = load_feature_values(h2_pkl)
         variant_df = pd.read_csv(variant_file, sep='\t')
         # Prepare data
         print(f'Predicting {len(raw_list)} SNVs')
@@ -559,5 +566,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     run_predict_dnn_phase(args.raw_pkl,args.h1_pkl,args.h2_pkl,args.variant_file,args.model_path,args.output_file,args.bam,[],args.FET)
-
 

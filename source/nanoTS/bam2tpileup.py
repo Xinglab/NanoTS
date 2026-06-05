@@ -28,6 +28,65 @@ def calculate_LLR(lambda_0, i, k, epsilon=0.005):
     ll_with_epsilon = -log_likelihood(0, i, k, epsilon)
     return ll_with_lambda - ll_with_epsilon
 
+
+BASES = ("A", "T", "C", "G")
+TARGET_CHROMS = [f'chr{i}' for i in range(1, 23)] + ['chrX', 'chrY']
+
+
+def format_candidate_result(chrom, pos, ref_base, base_counts, deletions, insertions,
+                            mismath_min=5, total_min=10, ratio_min=0.05,
+                            epsilon_value=0.01):
+    """Format one pileup column as the existing NanoTS candidate table row."""
+    ref_base = ref_base.upper()
+    ref_count = base_counts.get(ref_base, 0)
+    four_base_reads = [
+        0 if base == ref_base else base_counts.get(base, 0)
+        for base in BASES
+    ]
+    alt_count = max(four_base_reads)
+    total_coverage = ref_count + alt_count
+
+    if alt_count <= 0:
+        return None
+
+    max_alt_index = four_base_reads.index(alt_count)
+    alt = BASES[max_alt_index]
+    max_alt_indices = [i for i, x in enumerate(four_base_reads) if x == alt_count]
+    if deletions == alt_count:
+        max_alt_indices.append(4)
+    if insertions == alt_count:
+        max_alt_indices.append(5)
+    alts = [base for i, base in enumerate(['A', 'T', 'C', 'G', 'DEL', 'INS']) if i in max_alt_indices]
+
+    ratio1 = alt_count / total_coverage if total_coverage > 0 else 0
+    if not (total_coverage >= total_min and alt_count >= mismath_min and ratio1 >= ratio_min):
+        return None
+
+    lambda_1 = estimate_lambda_0(total_coverage, alt_count, epsilon_value)
+    LLR1 = calculate_LLR(lambda_1, alt_count, total_coverage, epsilon_value) if lambda_1 != "NA" else "NA"
+
+    other_counts = (
+        four_base_reads[:max_alt_index] +
+        four_base_reads[(max_alt_index + 1):] +
+        [deletions, insertions]
+    )
+    max_other_count = max(other_counts)
+    other_total_counts = ref_count + max_other_count
+    if other_total_counts > 0:
+        lambda_2 = estimate_lambda_0(other_total_counts, max_other_count, epsilon_value)
+        LLR2 = calculate_LLR(lambda_2, max_other_count, other_total_counts, epsilon_value) if lambda_2 != "NA" else "NA"
+        ratio2 = max_other_count / other_total_counts
+    else:
+        lambda_2, LLR2, ratio2 = 0, 0, 0
+
+    return '\t'.join([
+        str(field) for field in [
+            chrom, pos, ref_base, alt,
+            ref_count, alt_count, ratio1,
+            lambda_1, LLR1, ratio2, lambda_2, LLR2, ','.join(alts)
+        ]
+    ])
+
 def parse_pileup(input_stream, mismath_min=5, total_min=10, ratio_min=0.05, epsilon_value=0.01):
     """
     Parse a SAMtools pileup input stream to calculate base composition,
@@ -154,7 +213,92 @@ def parse_pileup(input_stream, mismath_min=5, total_min=10, ratio_min=0.05, epsi
 
 def run_mpileup_wrapper(args):
     (region, bam_path, ref_path, mismatch, total, ratio,epsilon)=args
-    return run_mpileup(region, bam_path, ref_path, mismatch, total, ratio,epsilon)
+    return run_pysam_pileup(region, bam_path, ref_path, mismatch, total, ratio,epsilon)
+
+
+def parse_region(region, chrom_lengths):
+    match = re.match(r"([^:]+)(?::(\d+)-(\d+))?$", region)
+    if not match:
+        raise ValueError("Invalid region format. Use 'chrom:start-end' or 'chrom'.")
+    chrom = match.group(1)
+    if chrom not in chrom_lengths:
+        raise ValueError(f"Chromosome '{chrom}' not found in BAM header.")
+    start = int(match.group(2)) if match.group(2) else 1
+    end = int(match.group(3)) if match.group(3) else chrom_lengths[chrom]
+    if start > chrom_lengths[chrom] or start < 1 or start > end:
+        raise ValueError("Invalid region 'start' scale.")
+    if end > chrom_lengths[chrom]:
+        end = chrom_lengths[chrom]
+    return chrom, start, end
+
+
+def run_pysam_pileup(region, bam_path, ref_path, mismatch, total, ratio, epsilon):
+    """
+    Use pysam/HTSlib pileup directly for candidate SNV detection.
+    """
+    results = []
+    with pysam.AlignmentFile(bam_path, "rb") as bam, pysam.FastaFile(ref_path) as ref:
+        chrom_lengths = {sq["SN"]: sq["LN"] for sq in bam.header["SQ"]}
+        chrom, start, end = parse_region(region, chrom_lengths)
+        ref_sequence = ref.fetch(chrom, start - 1, end).upper()
+
+        for column in bam.pileup(
+            chrom,
+            start - 1,
+            end,
+            truncate=True,
+            stepper="samtools",
+            fastafile=ref,
+            min_base_quality=0,
+            min_mapping_quality=20,
+            max_depth=5000,
+            compute_baq=False,
+            flag_filter=2316,
+        ):
+            ref_pos0 = column.reference_pos
+            ref_index = ref_pos0 - (start - 1)
+            if ref_index < 0 or ref_index >= len(ref_sequence):
+                continue
+            ref_base = ref_sequence[ref_index]
+            if ref_base not in BASES:
+                continue
+
+            base_counts = Counter()
+            deletions = 0
+            insertions = 0
+            for pileup_read in column.pileups:
+                read = pileup_read.alignment
+                if read.is_unmapped or read.is_duplicate or read.is_supplementary or read.is_secondary:
+                    continue
+                if pileup_read.is_refskip:
+                    continue
+                if pileup_read.indel > 0:
+                    insertions += 1
+                if pileup_read.is_del:
+                    deletions += 1
+                    continue
+                query_pos = pileup_read.query_position
+                if query_pos is None:
+                    continue
+                base = read.query_sequence[query_pos].upper()
+                if base in BASES:
+                    base_counts[base] += 1
+
+            result = format_candidate_result(
+                chrom,
+                ref_pos0 + 1,
+                ref_base,
+                base_counts,
+                deletions,
+                insertions,
+                mismath_min=mismatch,
+                total_min=total,
+                ratio_min=ratio,
+                epsilon_value=epsilon,
+            )
+            if result is not None:
+                results.append(result)
+    return results
 
 def run_mpileup(region, bam_path, ref_path, mismatch, total, ratio,epsilon):
     """
@@ -190,12 +334,12 @@ def split_regions_start(chrom, start_pos,end_pos, block_size=100000):
     Split a chromosome into smaller blocks of specified size.
     """
     regions = []
-    target_chrom=[f'chr{i}' for i in range(1,23)] + ['chrX','chrY']
-    if chrom in target_chrom:
+    if chrom in TARGET_CHROMS:
         for start in range(start_pos, end_pos+1, block_size):
             end = min(start + block_size, end_pos)
             regions.append(f"{chrom}:{start}-{end}")
         return regions
+    return regions
         
 def process_bam(bam_path, ref_path, region=None, mismatch=5, total=10, ratio=0.05, threads=4,epsilon=0.01):
     """
@@ -214,26 +358,16 @@ def process_bam(bam_path, ref_path, region=None, mismatch=5, total=10, ratio=0.0
     # Determine regions to process
     regions = []
     if region:
-        match = re.match(r"(\w+)(?::(\d+)-(\d+))?", region)
-        if not match:
-            raise ValueError("Invalid region format. Use 'chrom:start-end' or 'chrom'.")
-        chrom = match.group(1)
-        start = int(match.group(2)) if match.group(2) else 1
-        end = int(match.group(3)) if match.group(3) else chrom_lengths[chrom]
-        if start > chrom_lengths[chrom] or start<1 or start>end:
-            raise ValueError("Invalid region 'start' scale.")
-        if end >chrom_lengths[chrom]:
-            end=chrom_lengths[chrom]
+        chrom, start, end = parse_region(region, chrom_lengths)
         print(f"Detect SNV from {chrom}:{start}-{end}", file=sys.stderr)
 
         regions = split_regions_start(chrom,start, end)
     else:
         print(f"Detect SNV from", file=sys.stderr)
-        target_chrom=[f'chr{i}' for i in range(1,23)] + ['chrX','chrY']
-        print(target_chrom,file=sys.stderr)
+        print(TARGET_CHROMS,file=sys.stderr)
         
         for chrom, length in chrom_lengths.items():
-            if chrom in target_chrom:
+            if chrom in TARGET_CHROMS:
                 regions.extend(split_regions(chrom, length))
 
     # Run samtools mpileup for each region in parallel
@@ -284,4 +418,3 @@ if __name__ == "__main__":
     args = parser.parse_args()
     args.epsilon=args.epsilon/5
     process_bam(args.bam, args.ref, args.region, args.ALT, args.total, args.ratio, args.threads,args.epsilon)
-

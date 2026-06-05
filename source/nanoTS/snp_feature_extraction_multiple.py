@@ -14,6 +14,10 @@ import math
 import sys
 from collections import defaultdict
 from bisect import bisect_left
+
+
+FEATURE_CHUNK_BP = 100000
+FEATURE_SHARD_VARIANTS = 2000
     
 
 def get_all_nearest_neighbors(candidate_arr, query_positions, query_refs, query_alts, n=10):
@@ -391,17 +395,23 @@ def one_hot_encode_sequence(sequence):
     one_hot_matrix = np.array([mapping.get(base, [0, 0, 0, 0]) for base in sequence])
     return one_hot_matrix.T
 
-def calculate_base_fractions(reads, pos,nearest_snvs):
+def calculate_base_fractions(reads, pos,nearest_snvs, read_positions_cache=None):
     #print(pos)
     #print(nearest_snvs)
     base_counts = np.zeros((4, 61))
     nearest_snvs_count=np.zeros((3,20))
     bases = ["A", "C", "G", "T"]
+    base_to_idx = {base: idx for idx, base in enumerate(bases)}
     coverage = np.zeros(61)
     pos=pos-1
     nearest_snvs_20_pos=list(nearest_snvs.keys())
+    nearest_snvs_index = {snv_pos: idx for idx, snv_pos in enumerate(nearest_snvs_20_pos)}
     for read in reads:
-        read_positions = read.get_reference_positions(full_length=True)
+        read_positions = read_positions_cache.get(id(read)) if read_positions_cache is not None else None
+        if read_positions is None:
+            read_positions = read.get_reference_positions(full_length=True)
+            if read_positions_cache is not None:
+                read_positions_cache[id(read)] = read_positions
         read_bases = read.query_sequence # if aligned sense, same to ref, otherwise, reverse complemented
 
         for idx, ref_pos in enumerate(read_positions):
@@ -415,12 +425,13 @@ def calculate_base_fractions(reads, pos,nearest_snvs):
             if 0 <= window_idx < 61:
                 base = read_bases[idx]
                 coverage[window_idx] += 1
-                if base in bases:
-                    base_idx = bases.index(base)
+                base_idx = base_to_idx.get(base)
+                if base_idx is not None:
                     base_counts[base_idx, window_idx] += 1
                     
             ref_pos_1_based=ref_pos+1
-            if ref_pos_1_based in nearest_snvs:
+            nearest_snv_idx = nearest_snvs_index.get(ref_pos_1_based)
+            if nearest_snv_idx is not None:
                 
                 read_base = read_bases[idx]
                 #if read.is_reverse:
@@ -436,11 +447,11 @@ def calculate_base_fractions(reads, pos,nearest_snvs):
                     #print(read.query_name)
                     #print(read_bases)
                 if read_base == nearest_snvs[ref_pos_1_based][0]:
-                    nearest_snvs_count[0,nearest_snvs_20_pos.index(ref_pos_1_based)]+=1
+                    nearest_snvs_count[0,nearest_snv_idx]+=1
                 elif read_base == nearest_snvs[ref_pos_1_based][1]:
-                    nearest_snvs_count[1,nearest_snvs_20_pos.index(ref_pos_1_based)]+=1
+                    nearest_snvs_count[1,nearest_snv_idx]+=1
                 else:
-                    nearest_snvs_count[2,nearest_snvs_20_pos.index(ref_pos_1_based)]+=1
+                    nearest_snvs_count[2,nearest_snv_idx]+=1
         
     base_fractions = base_counts / (base_counts.sum(axis=0) + 1e-10)
     return base_fractions, base_counts , coverage,nearest_snvs_count
@@ -519,6 +530,196 @@ def extract_features_for_snp_wrapper(args):
     features = extract_features_for_snp(bam_file, reference_file, chrom, pos, ref, alt,read_depth,nearest_SNVs)
     return (index, features)
 
+
+def reads_overlap_position(reads, pos):
+    pos0 = pos - 1
+    return [
+        read for read in reads
+        if read.reference_start is not None
+        and read.reference_end is not None
+        and read.reference_start <= pos0 < read.reference_end
+    ]
+
+
+def reservoir_sample_from_list(reads, sample_size, seed=2025):
+    if sample_size <= 0 or len(reads) <= sample_size:
+        return reads
+    rng = random.Random(seed)
+    reservoir = []
+    for n, read in enumerate(reads, start=1):
+        if len(reservoir) < sample_size:
+            reservoir.append(read)
+        else:
+            j = rng.randrange(n)
+            if j < sample_size:
+                reservoir[j] = read
+    return reservoir
+
+
+def extract_features_for_snp_from_reads(reads, reference_file, chrom, pos, ref, alt, read_depth, nearest_snvs):
+    if read_depth > 0:
+        candidate_reads = reservoir_sample_from_list(reads_overlap_position(reads, pos), read_depth, seed=2025)
+    else:
+        candidate_reads = reads_overlap_position(reads, pos)
+    return extract_features_for_snp_from_read_list(candidate_reads, reference_file, chrom, pos, ref, alt, nearest_snvs)
+
+
+def extract_features_for_snp_from_read_list(all_reads, reference_file, chrom, pos, ref, alt, nearest_snvs):
+    mapq_threshold=20
+    ref_reads_forward = []
+    ref_reads_reverse = []
+    alt_reads_forward = []
+    alt_reads_reverse = []
+    other_reads = []
+    total_reads = []
+    read_positions_cache = {}
+    reference_sequence = get_reference_sequence(reference_file, chrom, pos)
+    for read in all_reads:
+        if read.is_unmapped or read.is_duplicate or read.mapping_quality < mapq_threshold or read.is_supplementary:
+            continue
+        
+        recalculated_mapq = recalculate_quality_from_nm(read)
+        if recalculated_mapq<10:
+            continue
+        total_reads.append(read)
+        read_positions = read.get_reference_positions(full_length=True)
+        read_positions_cache[id(read)] = read_positions
+        query_pos = None
+        for idx, ref_pos in enumerate(read_positions):
+            if ref_pos == pos - 1:
+                query_pos = idx
+                break
+        if query_pos is not None:
+            base_at_pos = read.query_sequence[query_pos]
+            if base_at_pos == ref:
+                if read.is_reverse:
+                    ref_reads_reverse.append(read)
+                else:
+                    ref_reads_forward.append(read)
+            elif base_at_pos == alt:
+                if read.is_reverse:
+                    alt_reads_reverse.append(read)
+                else:
+                    alt_reads_forward.append(read)
+            else:
+                other_reads.append(read)
+        else:
+            other_reads.append(read)
+
+    total_base_fraction, total_base_counts , total_coverage = calculate_base_fractions_total(total_reads, pos, read_positions_cache)
+    
+    ref_base_fractions_forward, ref_base_counts_forward , ref_coverage_forward, ref_nearest_snvs_counts_forward = calculate_base_fractions(ref_reads_forward, pos,nearest_snvs, read_positions_cache)
+    ref_base_fractions_reverse, ref_base_counts_reverse , ref_coverage_reverse, ref_nearest_snvs_counts_reverse = calculate_base_fractions(ref_reads_reverse, pos,nearest_snvs, read_positions_cache)
+    alt_base_fractions_forward, alt_base_counts_forward , alt_coverage_forward, alt_nearest_snvs_counts_forward = calculate_base_fractions(alt_reads_forward, pos,nearest_snvs, read_positions_cache)
+    alt_base_fractions_reverse, alt_base_counts_reverse , alt_coverage_reverse, alt_nearest_snvs_counts_reverse = calculate_base_fractions(alt_reads_reverse, pos,nearest_snvs, read_positions_cache)
+
+    one_hot_encoded_sequence = one_hot_encode_sequence(reference_sequence)
+    base_entropy = calculate_entropy_matrix(total_base_fraction)
+
+    ref_forward_start_dist, ref_forward_end_dist = compute_average_distances(ref_reads_forward, pos)
+    ref_reverse_start_dist, ref_reverse_end_dist = compute_average_distances(ref_reads_reverse, pos)
+    alt_forward_start_dist, alt_forward_end_dist = compute_average_distances(alt_reads_forward, pos)
+    alt_reverse_start_dist, alt_reverse_end_dist = compute_average_distances(alt_reads_reverse, pos)
+
+    nearest_snvs_fraction=counts2fractions(ref_nearest_snvs_counts_forward,ref_nearest_snvs_counts_reverse,alt_nearest_snvs_counts_forward,alt_nearest_snvs_counts_reverse)
+    
+    return (ref_base_fractions_forward, ref_coverage_forward, ref_base_fractions_reverse, ref_coverage_reverse,
+            alt_base_fractions_forward, alt_coverage_forward, alt_base_fractions_reverse, alt_coverage_reverse,
+            one_hot_encoded_sequence, total_base_fraction, base_entropy,
+            ref_forward_start_dist, ref_forward_end_dist, ref_reverse_start_dist, ref_reverse_end_dist,
+            alt_forward_start_dist, alt_forward_end_dist, alt_reverse_start_dist, alt_reverse_end_dist,
+            nearest_snvs_fraction[0],nearest_snvs_fraction[1],nearest_snvs_fraction[2],nearest_snvs_fraction[3])
+
+
+def build_variant_feature(features):
+    scale_coverage = max(
+        list(features[1]) + list(features[3]) + list(features[5]) + list(features[7])
+    )
+    if scale_coverage > 0:
+        features = list(features)
+        features[1] /= scale_coverage
+        features[3] /= scale_coverage
+        features[5] /= scale_coverage
+        features[7] /= scale_coverage
+        features = tuple(features)
+
+    return {
+        "ref_base_fractions_forward": features[0],
+        "ref_coverage_forward": features[1],
+        "ref_base_fractions_reverse": features[2],
+        "ref_coverage_reverse": features[3],
+        "alt_base_fractions_forward": features[4],
+        "alt_coverage_forward": features[5],
+        "alt_base_fractions_reverse": features[6],
+        "alt_coverage_reverse": features[7],
+        "one_hot_encoded_sequence": features[8],
+        "total_base_fraction": features[9],
+        "base_entropy": features[10],
+        "ref_forward_start_dist": features[11],
+        "ref_forward_end_dist": features[12],
+        "ref_reverse_start_dist": features[13],
+        "ref_reverse_end_dist": features[14],
+        "alt_forward_start_dist": features[15],
+        "alt_forward_end_dist": features[16],
+        "alt_reverse_start_dist": features[17],
+        "alt_reverse_end_dist": features[18],
+        "max_coverage":scale_coverage,
+        'ref_snvs_fractions_forward':features[19],
+        'ref_snvs_fractions_reverse':features[20],
+        'alt_snvs_fractions_forward':features[21],
+        'alt_snvs_fractions_reverse':features[22]
+    }
+
+
+def chunk_tasks_by_region(tasks, chunk_bp=FEATURE_CHUNK_BP):
+    if not tasks:
+        return []
+    chunks = []
+    current = []
+    current_chrom = None
+    current_start = None
+    for task in tasks:
+        chrom = task[3]
+        pos = task[4]
+        if current and (chrom != current_chrom or pos > current_start + chunk_bp):
+            chunks.append(current)
+            current = []
+            current_start = None
+        if not current:
+            current_chrom = chrom
+            current_start = pos
+        current.append(task)
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def extract_feature_chunk_wrapper(chunk_tasks):
+    first = chunk_tasks[0]
+    bam_file = first[1]
+    reference_file = first[2]
+    chrom = first[3]
+    chunk_start = min(task[4] for task in chunk_tasks) - 1
+    chunk_end = max(task[4] for task in chunk_tasks)
+
+    with pysam.AlignmentFile(bam_file, "rb") as bam:
+        chunk_reads = list(bam.fetch(chrom, chunk_start, chunk_end))
+
+    chunk_results = []
+    for index, _, _, chrom, pos, ref, alt, read_depth, nearest_snvs in chunk_tasks:
+        features = extract_features_for_snp_from_reads(
+            chunk_reads, reference_file, chrom, pos, ref, alt, read_depth, nearest_snvs
+        )
+        chunk_results.append((index, chrom, pos, features))
+    return chunk_results
+
+
+def write_feature_shard(output_prefix, shard_index, shard_features):
+    shard_path = f"{output_prefix}.shard{shard_index:06d}.pkl"
+    with open(shard_path, "wb") as file:
+        pickle.dump(shard_features, file)
+    return shard_path
+
 def sample_reads_randomly(bam_file, chrom, start, end, sample_size=1000, seed=42):
     """
     Randomly sample up to `sample_size` reads from a given region using reservoir sampling.
@@ -541,14 +742,19 @@ def sample_reads_randomly(bam_file, chrom, start, end, sample_size=1000, seed=42
                     reservoir[j] = read
 
     return reservoir
-def calculate_base_fractions_total(reads, pos):
+def calculate_base_fractions_total(reads, pos, read_positions_cache=None):
     base_counts = np.zeros((4, 61))
 
     bases = ["A", "C", "G", "T"]
+    base_to_idx = {base: idx for idx, base in enumerate(bases)}
     coverage = np.zeros(61)
     pos=pos-1
     for read in reads:
-        read_positions = read.get_reference_positions(full_length=True)
+        read_positions = read_positions_cache.get(id(read)) if read_positions_cache is not None else None
+        if read_positions is None:
+            read_positions = read.get_reference_positions(full_length=True)
+            if read_positions_cache is not None:
+                read_positions_cache[id(read)] = read_positions
         read_bases = read.query_sequence
 
         for idx, ref_pos in enumerate(read_positions):
@@ -558,8 +764,8 @@ def calculate_base_fractions_total(reads, pos):
             if 0 <= window_idx < 61:
                 base = read_bases[idx]
                 coverage[window_idx] += 1
-                if base in bases:
-                    base_idx = bases.index(base)
+                base_idx = base_to_idx.get(base)
+                if base_idx is not None:
                     base_counts[base_idx, window_idx] += 1
 
     base_fractions = base_counts / (base_counts.sum(axis=0) + 1e-10)
@@ -651,7 +857,7 @@ def extract_features_with_progress(task, progress):
     with progress.get_lock():  # Safely update shared progress counter
         progress.value += 1
     return result
-def extract_VCF_feature(vcf_file, bam_file, reference_file, num_processes,read_depth=1000,all_var=None):
+def extract_VCF_feature(vcf_file, bam_file, reference_file, num_processes,read_depth=1000,all_var=None,output_prefix=None):
     tasks = extract_tasks_with_nearest_snvs_preserve_order(
         vcf_file,
         bam_file,
@@ -659,64 +865,64 @@ def extract_VCF_feature(vcf_file, bam_file, reference_file, num_processes,read_d
         read_depth,
         all_var
     )
+    if not tasks:
+        return [] if output_prefix else {}
 
     widgets = ['Extract SNV features: ', progressbar.Percentage(), ' ', progressbar.Bar(marker='=', left='[', right=']'), ' ', progressbar.ETA()]
     bar = progressbar.ProgressBar(widgets=widgets, maxval=len(tasks)).start()
 
+    all_results = []
+    shard_paths = []
+    pending_by_index = {}
+    next_index_to_write = 0
+    shard_index = 1
+    shard_features = {}
+    count = 0
+
+    def consume_result(index, chrom, pos, features):
+        nonlocal next_index_to_write, shard_index, shard_features
+        feature_entry = build_variant_feature(features)
+        if output_prefix:
+            pending_by_index[index] = (chrom, pos, feature_entry)
+            while next_index_to_write in pending_by_index:
+                out_chrom, out_pos, out_feature = pending_by_index.pop(next_index_to_write)
+                shard_features[(out_chrom, out_pos)] = out_feature
+                next_index_to_write += 1
+                if len(shard_features) >= FEATURE_SHARD_VARIANTS:
+                    shard_paths.append(write_feature_shard(output_prefix, shard_index, shard_features))
+                    shard_index += 1
+                    shard_features = {}
+        else:
+            all_results.append((index, chrom, pos, feature_entry))
 
     with Pool(processes=num_processes) as pool:
-        all_results = []
-        count = 0
+        if read_depth > 0:
+            result_iter = pool.imap_unordered(extract_features_for_snp_wrapper, tasks)
+            for index, features in result_iter:
+                chrom = tasks[index][3]
+                pos = tasks[index][4]
+                consume_result(index, chrom, pos, features)
+                count += 1
+                bar.update(count)
+        else:
+            task_chunks = chunk_tasks_by_region(tasks)
+            for chunk_result in pool.imap_unordered(extract_feature_chunk_wrapper, task_chunks):
+                for index, chrom, pos, features in chunk_result:
+                    consume_result(index, chrom, pos, features)
+                    count += 1
+                    bar.update(count)
 
-        # 2) Use the top-level function in imap_unordered
-        for result in pool.imap_unordered(extract_features_for_snp_wrapper, tasks):
-            all_results.append(result)
-            count += 1
-            bar.update(count)
-        
-        # Sort results by the original index if needed
+    if output_prefix and shard_features:
+        shard_paths.append(write_feature_shard(output_prefix, shard_index, shard_features))
     all_results.sort(key=lambda x: x[0])
     bar.finish()
+    if output_prefix:
+        return shard_paths
+
     # Build variant features dictionary
     variant_features = {}
-    for (_, bam_file, reference_file, chrom, pos, ref, alt,read_depth,nearest_snvs), (_, features) in zip(tasks, all_results):
-        scale_coverage = max(
-            list(features[1]) + list(features[3]) + list(features[5]) + list(features[7])
-        )
-        if scale_coverage > 0:
-            features = list(features)
-            features[1] /= scale_coverage
-            features[3] /= scale_coverage
-            features[5] /= scale_coverage
-            features[7] /= scale_coverage
-            features = tuple(features)
-
-        variant_features[(chrom, pos)] = {
-            "ref_base_fractions_forward": features[0],
-            "ref_coverage_forward": features[1],
-            "ref_base_fractions_reverse": features[2],
-            "ref_coverage_reverse": features[3],
-            "alt_base_fractions_forward": features[4],
-            "alt_coverage_forward": features[5],
-            "alt_base_fractions_reverse": features[6],
-            "alt_coverage_reverse": features[7],
-            "one_hot_encoded_sequence": features[8],
-            "total_base_fraction": features[9],
-            "base_entropy": features[10],
-            "ref_forward_start_dist": features[11],
-            "ref_forward_end_dist": features[12],
-            "ref_reverse_start_dist": features[13],
-            "ref_reverse_end_dist": features[14],
-            "alt_forward_start_dist": features[15],
-            "alt_forward_end_dist": features[16],
-            "alt_reverse_start_dist": features[17],
-            "alt_reverse_end_dist": features[18],
-            "max_coverage":scale_coverage,
-            'ref_snvs_fractions_forward':features[19],
-            'ref_snvs_fractions_reverse':features[20],
-            'alt_snvs_fractions_forward':features[21],
-            'alt_snvs_fractions_reverse':features[22]
-        }
+    for _, chrom, pos, feature_entry in all_results:
+        variant_features[(chrom, pos)] = feature_entry
     return variant_features
 def run_snp_feature_extraction_multiple(args):
     filtered_variant = filter_vcf(
@@ -750,11 +956,15 @@ def run_snp_feature_extraction_multiple(args):
             5   
         )
     if args.all_v:
-        feature_for_train = extract_VCF_feature(args.filtered_variant, args.bam, args.ref, args.threads,args.depth,args.all_v+'.filter')
+        extract_VCF_feature(
+            args.filtered_variant, args.bam, args.ref, args.threads, args.depth, args.all_v+'.filter',
+            output_prefix=args.output
+        )
     else:
-        feature_for_train = extract_VCF_feature(args.filtered_variant, args.bam, args.ref, args.threads,args.depth,args.filtered_variant+'.alt_5')
-    with open(args.output, "wb") as file:
-        pickle.dump(feature_for_train, file)
+        extract_VCF_feature(
+            args.filtered_variant, args.bam, args.ref, args.threads, args.depth, args.filtered_variant+'.alt_5',
+            output_prefix=args.output
+        )
     
 
 if __name__ == "__main__":
@@ -775,7 +985,3 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     run_snp_feature_extraction_multiple(args)
-
-
-
-

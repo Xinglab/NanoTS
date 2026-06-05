@@ -23,6 +23,19 @@ warnings.filterwarnings("ignore")
 
 import math
 import pysam
+import glob
+
+
+def load_feature_values(feature_prefix):
+    shard_files = sorted(glob.glob(feature_prefix + '.shard*.pkl'))
+    if not shard_files:
+        shard_files = [feature_prefix]
+
+    values = []
+    for shard_file in shard_files:
+        with open(shard_file, "rb") as file:
+            values.extend(pickle.load(file).values())
+    return values
 
 def convert_to_vcf(df, output_file,contigs):
     """
@@ -425,8 +438,7 @@ def run_predict_dnn(input_file,variant_file,model_path,output_file,bam_path,targ
 
         for i in target_chr:
             print(f'Start processing chr{i}')
-            with open(input_file+f'.chr{i}', "rb") as file:
-                predict_list = list(pickle.load(file).values())
+            predict_list = load_feature_values(input_file+f'.chr{i}')
             
             # Load variant DataFrame
             variant_df_each = pd.read_csv(variant_file+f'.chr{i}', sep='\t')
@@ -440,8 +452,7 @@ def run_predict_dnn(input_file,variant_file,model_path,output_file,bam_path,targ
         variant_df = pd.concat(variant_df_list, axis=0, ignore_index=True)
     else:
         print(f'Start processing')
-        with open(input_file, "rb") as file:
-            predict_list = list(pickle.load(file).values())
+        predict_list = load_feature_values(input_file)
         
         # Load variant DataFrame
         variant_df = pd.read_csv(variant_file, sep='\t')
@@ -475,5 +486,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     run_predict_dnn(args.input_file,args.variant_file,args.model_path,args.output_file,args.bam)
-
 

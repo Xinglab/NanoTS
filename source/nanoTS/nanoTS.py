@@ -3,7 +3,6 @@ from collections import defaultdict
 import argparse
 import sys
 import subprocess
-import pickle
 import argparse,sys
 from contextlib import redirect_stdout
 
@@ -122,7 +121,8 @@ def run_phased_call(bam, ref, threads, depth, model, outdir):
     target_chr=[]
     for i in list(map(str, range(1, 23))) + ['X', 'Y']:
         chrom=f'.chr{i}'
-        if os.path.exists(unphased_step2_feature_alt_file+chrom) and os.path.exists(unphased_step2_feature_alt_file_5+chrom) and os.path.exists(unphased_step2_feature_pkl_file+chrom):
+        feature_exists = os.path.exists(unphased_step2_feature_pkl_file+chrom) or glob.glob(unphased_step2_feature_pkl_file+chrom+'.shard*.pkl')
+        if os.path.exists(unphased_step2_feature_alt_file+chrom) and os.path.exists(unphased_step2_feature_alt_file_5+chrom) and feature_exists:
             target_chr.append(i)
     logging.info(f"Processing chromosomes: {target_chr}")
     
@@ -131,17 +131,15 @@ def run_phased_call(bam, ref, threads, depth, model, outdir):
     for i in target_chr:
         chrom=f'.chr{i}'
         logging.info(f'Start processing chrom {chrom} H1...')
-        H1_feature_for_train = extract_VCF_feature( 
-            unphased_step2_feature_alt_file+chrom, H1_bam, ref, threads, depth, unphased_step2_feature_alt_file_5+chrom
+        extract_VCF_feature( 
+            unphased_step2_feature_alt_file+chrom, H1_bam, ref, threads, depth, unphased_step2_feature_alt_file_5+chrom,
+            output_prefix=H1_feature_pkl_file+chrom
         )
-        with open(H1_feature_pkl_file+chrom, "wb") as file:
-            pickle.dump(H1_feature_for_train, file)
         logging.info(f'Start processing chrom {chrom} H2...')    
-        H2_feature_for_train = extract_VCF_feature(
-            unphased_step2_feature_alt_file+chrom, H2_bam, ref, threads, depth, unphased_step2_feature_alt_file_5+chrom
+        extract_VCF_feature(
+            unphased_step2_feature_alt_file+chrom, H2_bam, ref, threads, depth, unphased_step2_feature_alt_file_5+chrom,
+            output_prefix=H2_feature_pkl_file+chrom
         )
-        with open(H2_feature_pkl_file+chrom, "wb") as file:
-            pickle.dump(H2_feature_for_train, file)
     
     logging.info("Run DNN model")
     run_predict_dnn_phase(unphased_step2_feature_pkl_file,H1_feature_pkl_file,H2_feature_pkl_file,
@@ -193,9 +191,10 @@ def loop_unphased_feature(step2_feature_alt_file,step2_feature_alt_file_5,step2_
         each_filtered_variant.to_csv(each_f_var_file, sep='\t', index=False)       
         filtered_variant_5.loc[filtered_variant_5.loc[:,'chrom']==f'chr{i}',:].to_csv(each_alt5_var, sep='\t', index=False)       
          
-        feature_for_train = extract_VCF_feature(each_f_var_file, bam, ref, threads,depth,each_alt5_var)
-        with open(step2_feature_pkl_file+'.chr'+str(i), "wb") as file:
-            pickle.dump(feature_for_train, file)
+        extract_VCF_feature(
+            each_f_var_file, bam, ref, threads, depth, each_alt5_var,
+            output_prefix=step2_feature_pkl_file+'.chr'+str(i)
+        )
     return(target_chr)
 
 def run_unphased_call(bam, ref, region, ALT, total, ratio, threads, depth, model, outdir):
@@ -482,4 +481,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
