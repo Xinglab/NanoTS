@@ -6,7 +6,7 @@ Download and extract `GIAB_variant_calling_results.tar.gz` from [Zenodo](https:/
 
 This evaluates phased and unphased NanoTS for all eight datasets, alongside Clair3-RNA and LongcallR-nf, using total depth >= 2, ALT reads >= 5, and VAF >= 0.05. Each comparison uses the corresponding NanoTS eval background and the script's default allele adjustment.
 
-**VCF FILTER selection (`V7`):** Clair3-RNA uses `ALL`, which includes all three FILTER types observed in these files: `PASS`, `LowQual`, and `RNAEditing`. LongcallR-nf uses `not:HomRef`, which includes its `PASS` and `LowQual` records and excludes records whose FILTER is exactly `HomRef`. Thus, low-quality calls are included for both callers. These settings reproduce the original benchmark's filtering rules; the NanoTS candidate background, depth/VAF thresholds, and default allele adjustment still apply when calculating SNV precision, recall, and F1.
+**VCF FILTER selection (`V7`):** Clair3-RNA uses `ALL`, which includes all three FILTER types observed in these files: `PASS`, `LowQual`, and `RNAEditing`. LongcallR-nf uses `not:HomRef`, which includes its `PASS` and `LowQual` records and excludes records whose FILTER is exactly `HomRef`. Thus, low-quality calls are included for both callers. The NanoTS candidate background, depth/VAF thresholds, and default allele adjustment also apply when calculating SNV precision, recall, and F1.
 
 ```bash
 DATA_DIR=/path/to/GIAB_variant_calling_results

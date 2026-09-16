@@ -1,8 +1,8 @@
 # NanoTS Benchmark Workflow
 
-This document describes how to reproduce the existing `evaluate_predict_HG.py` eval tables and the metrics from `Rcode/functions.R` (`get_metric_all_zyg()` and `get_metric_all_zyg_deepvariant()`). Metrics are computed on the NanoTS candidate background after the specified read-depth and VAF filters.
+This workflow generates NanoTS eval tables and calculates precision, recall, and F1 for NanoTS and other variant callers. Metrics are computed on the NanoTS candidate background after the specified read-depth and VAF filters.
 
-The important rule is that **NanoTS builds the eval table**. NanoTS keeps the full candidate background, while other tools may only output called sites. Other tools should be compared later by overlaying their calls onto the NanoTS eval background.
+Use the same **NanoTS candidate background** for all callers in a comparison. Build the eval table from NanoTS candidate and prediction rows, including non-SNP rows, then overlay the other callers' calls onto that table.
 
 ## Inputs
 
@@ -26,7 +26,7 @@ The Python generator needs `pandas` and `pysam`. BED filtering is built in and a
 
 ## Step 1: Generate NanoTS Eval Table
 
-If your NanoTS prediction table already contains candidate and prediction columns:
+For a NanoTS prediction table containing candidate and prediction columns:
 
 ```bash
 python \
@@ -60,7 +60,7 @@ python \
   --output /path/to/eval.phase.txt
 ```
 
-The default output preserves every input column and row order, replaces missing input values with zero, and appends only `Label`, `Zygosity`, and `GIAB_ALT`, exactly as the original generator does. Prediction columns are not synthesized unless `--candidates` is used. A typical prediction table produces:
+The default output preserves input columns and row order, replaces missing input values with zero, and appends `Label`, `Zygosity`, and `GIAB_ALT`. Prediction columns are not synthesized unless `--candidates` is used. A typical prediction table produces:
 
 ```text
 chrom pos ref alt ref_reads alt_reads ratio_1
@@ -69,22 +69,22 @@ Result_snv Result_heterzygosity Result_genotype
 Label Zygosity GIAB_ALT
 ```
 
-### Reproduce the original command
+### Select a chromosome
 
-The original option names are aliases, so the same command can use the new script:
+Use `--chrom` to restrict the eval table to a chromosome:
 
 ```bash
 python other_scripts/generate_eval_table.py \
-  --lr_variants /path/to/unphased_predict.txt \
-  --bed_file /path/to/confident_regions.bed \
-  --hc_vcf /path/to/GIAB.vcf.gz \
+  --nanots /path/to/unphased_predict.txt \
+  --bed /path/to/confident_regions.bed \
+  --truth-vcf /path/to/GIAB.vcf.gz \
   --chrom chr1 \
-  --long_vcf_in /path/to/eval.chr1
+  --output /path/to/eval.chr1
 ```
 
-Use the same chromosome, BED, indexed truth VCF, prediction table, and input separator for byte-identical output. Repeating `--chrom chr1 --chrom chr2 ...` concatenates chromosomes in the supplied order, matching the original shell loop with a single header. Without `--chrom`, input row order is retained across chromosomes. `--threads` does not change output order or contents.
+Repeating `--chrom chr1 --chrom chr2 ...` concatenates chromosomes in the supplied order with a single header. Without `--chrom`, input row order is retained across chromosomes. Use `--threads` to set the number of annotation workers; it does not change output order or contents.
 
-For historical equivalence, keep default position matching and do not enable `--candidates`, `--truth-table`, `--match-by allele`, `--keep-outside-bed`, or `--drop-truth-indel-region`; those are extensions without an original equivalent. The original does not exclude indel regions. The output is always tab-separated, even when `--sep` specifies a different input separator.
+Truth matching uses chromosome and position by default; `--match-by allele` also requires matching REF and ALT alleles. Truth indel regions are kept unless `--drop-truth-indel-region` is specified. The output is always tab-separated; `--sep` controls the input-table separator.
 
 ## Step 2: Prepare Optional Tool Manifest
 
@@ -99,13 +99,13 @@ LongCallR	/path/to/longcallr.vcf	vcf	not:HomRef
 DeepVariant	/path/to/deepvariant.vcf.gz	vcf	not:HomRef
 ```
 
-If no `--tools` is provided, the benchmark reports NanoTS only. The names `Clair3-RNA`, `LongCallR` (also `LongcallR`), and `DeepVariant` select the corresponding historical caller conventions. When using another display name, add a `legacy_caller` column with one of these names. Missing tool files produce an error.
+If no `--tools` is provided, the benchmark reports NanoTS only. The names `Clair3-RNA`, `LongCallR` (also `LongcallR`), and `DeepVariant` select caller-specific filtering and genotype handling. When using another display name, add a `legacy_caller` column with one of these names. Missing tool files produce an error.
 
-For exact historical DeepVariant reproduction, the manifest must also contain one LongCallR VCF. The original DeepVariant wrapper uses the LongCallR positions after restricting LongCallR to the eval background when constructing DeepVariant keys. This behavior is intentionally preserved, including the original R vector recycling; retain the original input file ordering. It is a historical compatibility rule, not a recommended independent DeepVariant matching method.
+DeepVariant evaluation requires exactly one LongCallR VCF in the manifest. The script constructs DeepVariant site keys using DeepVariant chromosome names and LongCallR positions after restricting LongCallR to the eval background. Positions are paired by row, with R vector recycling when lengths differ, so the results depend on the LongCallR input and row ordering.
 
 ## Step 3: Final Precision, Recall, F1
 
-Run one benchmark at ALT >= 5 and total depth >= 2, matching the default in the original `get_metric_all_zyg()` wrapper:
+Run a benchmark with the default thresholds: ALT reads >= 5, total depth >= 2, and VAF >= 0.05:
 
 ```bash
 Rscript other_scripts/generic_benchmark.R \
@@ -126,7 +126,7 @@ Main outputs:
 /path/to/benchmark_ALT5/tool_site_counts.tsv
 ```
 
-`summary_metrics.tsv` reports SNV Precision, Recall, and F1 on the filtered candidate background. Empty precision/recall denominators remain `NaN`, matching the original R function; the corresponding F1 is zero.
+`summary_metrics.tsv` reports SNV Precision, Recall, and F1 on the filtered candidate background. Precision or recall is `NaN` when its denominator is zero; the corresponding F1 is zero.
 
 Important columns:
 
@@ -134,7 +134,7 @@ Important columns:
 tool Precision Recall F1 identified SNPs by caller gold-standard SNPs Identified gold-standard SNPs by caller
 ```
 
-`genotype_metrics.tsv` reports genotype-level Precision, Recall, and F1 for each genotype class. `genotype_metrics_wide.tsv` also exports all 21 genotype metrics returned by the original function, including macro, weighted, and variant-only metrics. The TSV reports retain the generic wrapper layout; metric values reproduce the original returned matrices. `tool_site_counts.tsv` counts sites after chromosome/BED/tie preprocessing and call overlay, before depth and VAF thresholds; it is not a per-threshold metric table.
+`genotype_metrics.tsv` reports precision, recall, and F1 for each genotype class. `genotype_metrics_wide.tsv` contains 21 genotype metrics, including per-class, macro, weighted, and variant-only metrics. `tool_site_counts.tsv` counts sites after chromosome/BED/tie preprocessing and call overlay, before depth and VAF thresholds; it is not a per-threshold metric table.
 
 Example columns:
 
@@ -177,7 +177,7 @@ NanoTS	5	5	...
 
 ## VAF Bin Series
 
-For VAF bins, run the benchmark once per VAF interval using `--min-alt-ratio` and `--max-alt-ratio`. Both limits are inclusive to reproduce the original R code: a site at VAF 0.20 appears in both neighboring bins. Do not sum bin counts as if the bins were disjoint.
+For VAF bins, run the benchmark once per VAF interval using `--min-alt-ratio` and `--max-alt-ratio`. Both limits are inclusive: a site at VAF 0.20 appears in both neighboring bins. Do not sum bin counts as if the bins were disjoint.
 
 Example bins:
 
@@ -255,20 +255,9 @@ Collect all VAF-bin genotype metrics:
 
 ## Notes
 
-- `--ratio-alt 0.05` is the callable-site lower VAF cutoff used in your existing R code.
+- `--ratio-alt` sets the minimum VAF for callable sites; the default is `0.05`.
 - `--num-alt` is the minimum ALT read threshold.
 - `--num-total` is the minimum total read threshold.
 - `--thresholds` uses the same value for `num-alt` and `num-total`.
 - The eval table should be generated once from NanoTS and reused for comparisons.
 - Other tools should not build the eval background because they may omit non-called candidate sites.
-
-## Historical conventions retained
-
-- Truth matches `(chrom, pos)`, without checking the called ALT or truth genotype for ALT presence. The last truth ALT at a position is saved in `GIAB_ALT`. A site is `Het` if any sample in any record at that position has GT `(0,1)` or `(1,0)`; other genotypes are `Hom`.
-- Python confidence BED filtering uses `start + 1 <= pos <= end`. Optional R `--bed` filtering retains the original R inclusive `start <= pos <= end` convention. These two stages intentionally differ.
-- R keeps the first eval row per position. Passing external calls are overlaid in input order, so the last passing ALT at a position wins.
-- SNV allele adjustment changes wrong-ALT calls to non-PASS before calculating precision. Genotype metrics independently use the original predicted genotypes, including filtered or allele-mismatched calls.
-- LongCallR and DeepVariant recognize unphased `1/1` as homozygous ALT; Clair3-RNA also recognizes `1|1`, as in the reference branches. Genotype matching uses the full first sample field, as the original does.
-- Both VAF limits are inclusive. Adjacent example bins therefore share sites at their boundaries.
-- `--remove-tie` and `--only-tie` reproduce the options in `get_metric_all_zyg()` and require `alt_tie` in the eval table. The original DeepVariant wrapper has no tie options.
-- The original DeepVariant wrapper defaults to `num_total=5, num_alt=5`; pass `--num-total 5 --num-alt 5` to reproduce those defaults. The generic CLI defaults to the three-caller wrapper's `num_total=2, num_alt=5`.
