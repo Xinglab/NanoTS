@@ -1,6 +1,6 @@
 # NanoTS Benchmark Workflow
 
-This document describes how to build a NanoTS-based eval table and compute final Precision, Recall, and F1 across ALT-read thresholds and VAF bins.
+This document describes how to reproduce the existing `evaluate_predict_HG.py` eval tables and the metrics from `Rcode/functions.R` (`get_metric_all_zyg()` and `get_metric_all_zyg_deepvariant()`). Metrics are computed on the NanoTS candidate background after the specified read-depth and VAF filters.
 
 The important rule is that **NanoTS builds the eval table**. NanoTS keeps the full candidate background, while other tools may only output called sites. Other tools should be compared later by overlaying their calls onto the NanoTS eval background.
 
@@ -8,27 +8,21 @@ The important rule is that **NanoTS builds the eval table**. NanoTS keeps the fu
 
 Required files:
 
-- NanoTS prediction/detail table
-  - Usually `unphased_predict.txt` or `phased_predict.txt`
+- NanoTS prediction/detail table, including non-SNP rows
+  - Usually `unphased_predict.txt` or `phased_predict.txt`; do not substitute a PASS-only VCF
 - Truth VCF, for example GIAB high-confidence VCF
 - Optional confident BED region
 
-Scripts:
+Scripts (paths relative to the NanoTS repository root):
 
-```bash
-NanoTS/other_scripts/generate_eval_table.py
-NanoTS/other_scripts/generic_benchmark.R
+```text
+other_scripts/generate_eval_table.py
+other_scripts/generic_benchmark.R
 ```
 
-Run the Python command inside an environment with NanoTS dependencies installed.
+Run all commands below from the **NanoTS repository root**, with the Python environment activated and `Rscript` available on `PATH`. Replace `/path/to/...` with your actual paths. Create the parent directory of each Python `--output` file first; the R benchmark creates its `--outdir` automatically. Keep chromosome names consistent across the prediction table, truth VCF, BED, and caller files (for example, `chr1` throughout).
 
-BED filtering in `generate_eval_table.py` uses `pybedtools`, so users must install both `pybedtools` and the `bedtools` command-line tools before running commands with `--bed`.
-
-Example:
-
-```bash
-conda install -c bioconda pybedtools bedtools
-```
+The Python generator needs `pandas` and `pysam`. BED filtering is built in and accepts plain or gzipped BED files. The R benchmark needs `data.table`.
 
 ## Step 1: Generate NanoTS Eval Table
 
@@ -66,7 +60,7 @@ python \
   --output /path/to/eval.phase.txt
 ```
 
-The output contains the fields used by the benchmark code:
+The default output preserves every input column and row order, replaces missing input values with zero, and appends only `Label`, `Zygosity`, and `GIAB_ALT`, exactly as the original generator does. Prediction columns are not synthesized unless `--candidates` is used. A typical prediction table produces:
 
 ```text
 chrom pos ref alt ref_reads alt_reads ratio_1
@@ -75,11 +69,28 @@ Result_snv Result_heterzygosity Result_genotype
 Label Zygosity GIAB_ALT
 ```
 
+### Reproduce the original command
+
+The original option names are aliases, so the same command can use the new script:
+
+```bash
+python other_scripts/generate_eval_table.py \
+  --lr_variants /path/to/unphased_predict.txt \
+  --bed_file /path/to/confident_regions.bed \
+  --hc_vcf /path/to/GIAB.vcf.gz \
+  --chrom chr1 \
+  --long_vcf_in /path/to/eval.chr1
+```
+
+Use the same chromosome, BED, indexed truth VCF, prediction table, and input separator for byte-identical output. Repeating `--chrom chr1 --chrom chr2 ...` concatenates chromosomes in the supplied order, matching the original shell loop with a single header. Without `--chrom`, input row order is retained across chromosomes. `--threads` does not change output order or contents.
+
+For historical equivalence, keep default position matching and do not enable `--candidates`, `--truth-table`, `--match-by allele`, `--keep-outside-bed`, or `--drop-truth-indel-region`; those are extensions without an original equivalent. The original does not exclude indel regions. The output is always tab-separated, even when `--sep` specifies a different input separator.
+
 ## Step 2: Prepare Optional Tool Manifest
 
 The R benchmark always includes NanoTS from `--eval`. Optional tools can be added with a manifest TSV.
 
-Example `tools.tsv`:
+Example `tools.tsv` (tab-separated, with literal tab characters between fields):
 
 ```text
 tool	file	type	pass_filter
@@ -88,7 +99,9 @@ LongCallR	/path/to/longcallr.vcf	vcf	not:HomRef
 DeepVariant	/path/to/deepvariant.vcf.gz	vcf	not:HomRef
 ```
 
-If no `--tools` is provided, the benchmark reports NanoTS only.
+If no `--tools` is provided, the benchmark reports NanoTS only. The names `Clair3-RNA`, `LongCallR` (also `LongcallR`), and `DeepVariant` select the corresponding historical caller conventions. When using another display name, add a `legacy_caller` column with one of these names. Missing tool files produce an error.
+
+For exact historical DeepVariant reproduction, the manifest must also contain one LongCallR VCF. The original DeepVariant wrapper uses the LongCallR positions after restricting LongCallR to the eval background when constructing DeepVariant keys. This behavior is intentionally preserved, including the original R vector recycling; retain the original input file ordering. It is a historical compatibility rule, not a recommended independent DeepVariant matching method.
 
 ## Step 3: Final Precision, Recall, F1
 
@@ -109,9 +122,11 @@ Main outputs:
 ```text
 /path/to/benchmark_ALT5/summary_metrics.tsv
 /path/to/benchmark_ALT5/genotype_metrics.tsv
+/path/to/benchmark_ALT5/genotype_metrics_wide.tsv
+/path/to/benchmark_ALT5/tool_site_counts.tsv
 ```
 
-`summary_metrics.tsv` reports overall SNV Precision, Recall, and F1.
+`summary_metrics.tsv` reports SNV Precision, Recall, and F1 on the filtered candidate background. Empty precision/recall denominators remain `NaN`, matching the original R function; the corresponding F1 is zero.
 
 Important columns:
 
@@ -119,7 +134,7 @@ Important columns:
 tool Precision Recall F1 identified SNPs by caller gold-standard SNPs Identified gold-standard SNPs by caller
 ```
 
-`genotype_metrics.tsv` reports genotype-level Precision, Recall, and F1 for each genotype class.
+`genotype_metrics.tsv` reports genotype-level Precision, Recall, and F1 for each genotype class. `genotype_metrics_wide.tsv` also exports all 21 genotype metrics returned by the original function, including macro, weighted, and variant-only metrics. The TSV reports retain the generic wrapper layout; metric values reproduce the original returned matrices. `tool_site_counts.tsv` counts sites after chromosome/BED/tie preprocessing and call overlay, before depth and VAF thresholds; it is not a per-threshold metric table.
 
 Example columns:
 
@@ -162,7 +177,7 @@ NanoTS	5	5	...
 
 ## VAF Bin Series
 
-For VAF bins, run the benchmark once per VAF interval using `--min-alt-ratio` and `--max-alt-ratio`.
+For VAF bins, run the benchmark once per VAF interval using `--min-alt-ratio` and `--max-alt-ratio`. Both limits are inclusive to reproduce the original R code: a site at VAF 0.20 appears in both neighboring bins. Do not sum bin counts as if the bins were disjoint.
 
 Example bins:
 
@@ -246,3 +261,14 @@ Collect all VAF-bin genotype metrics:
 - `--thresholds` uses the same value for `num-alt` and `num-total`.
 - The eval table should be generated once from NanoTS and reused for comparisons.
 - Other tools should not build the eval background because they may omit non-called candidate sites.
+
+## Historical conventions retained
+
+- Truth matches `(chrom, pos)`, without checking the called ALT or truth genotype for ALT presence. The last truth ALT at a position is saved in `GIAB_ALT`. A site is `Het` if any sample in any record at that position has GT `(0,1)` or `(1,0)`; other genotypes are `Hom`.
+- Python confidence BED filtering uses `start + 1 <= pos <= end`. Optional R `--bed` filtering retains the original R inclusive `start <= pos <= end` convention. These two stages intentionally differ.
+- R keeps the first eval row per position. Passing external calls are overlaid in input order, so the last passing ALT at a position wins.
+- SNV allele adjustment changes wrong-ALT calls to non-PASS before calculating precision. Genotype metrics independently use the original predicted genotypes, including filtered or allele-mismatched calls.
+- LongCallR and DeepVariant recognize unphased `1/1` as homozygous ALT; Clair3-RNA also recognizes `1|1`, as in the reference branches. Genotype matching uses the full first sample field, as the original does.
+- Both VAF limits are inclusive. Adjacent example bins therefore share sites at their boundaries.
+- `--remove-tie` and `--only-tie` reproduce the options in `get_metric_all_zyg()` and require `alt_tie` in the eval table. The original DeepVariant wrapper has no tie options.
+- The original DeepVariant wrapper defaults to `num_total=5, num_alt=5`; pass `--num-total 5 --num-alt 5` to reproduce those defaults. The generic CLI defaults to the three-caller wrapper's `num_total=2, num_alt=5`.

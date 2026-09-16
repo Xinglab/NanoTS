@@ -42,6 +42,9 @@ MANIFEST
 pip-log.txt
 pip-delete-this-directory.txt
 
+# Local self-test scripts
+/other_scripts/tests/
+
 # Unit test / coverage reports
 htmlcov/
 .tox/

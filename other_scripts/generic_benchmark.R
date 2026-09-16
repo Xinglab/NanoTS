@@ -23,7 +23,10 @@
 #   pass_filter comma-separated PASS labels for VCF/table filter column
 #   chrom_col,pos_col,ref_col,alt_col,filter_col,gt_col column names for table
 #   sep         table separator, default tab
-#   match_by    pos or allele, default pos
+#   legacy_caller NanoTS, Clair3-RNA, LongCallR, or DeepVariant (defaults to tool)
+# All matching is by position, as in script/Rcode/functions.R.
+# Historical BED, allele adjustment, VAF, and caller genotype conventions are
+# intentionally retained for reproducibility; see doc/benchmark_README.md.
 #######
 
 suppressPackageStartupMessages({
@@ -55,7 +58,9 @@ parse_args <- function() {
     target_chr = "",
     bed = "",
     thresholds = "",
-    adjust_genotype = TRUE
+    adjust_genotype = TRUE,
+    remove_tie = FALSE,
+    only_tie = FALSE
   )
 
   i <- 1
@@ -78,7 +83,9 @@ parse_args <- function() {
       out[[key]] <- as.numeric(out[[key]])
     }
   }
-  out$adjust_genotype <- !(tolower(as.character(out$adjust_genotype)) %in% c("false", "f", "0", "no"))
+  for (key in c("adjust_genotype", "remove_tie", "only_tie")) {
+    out[[key]] <- !(tolower(as.character(out[[key]])) %in% c("false", "f", "0", "no"))
+  }
   out
 }
 
@@ -95,6 +102,9 @@ Optional:
   --thresholds 2,5,10
   --target-chr chr20
   --bed regions.bed.gz
+  --adjust-genotype true
+  --remove-tie false
+  --only-tie false
 
 tools.tsv required columns:
   tool, file, type
@@ -127,10 +137,11 @@ calculate_f1 <- function(precision, recall) {
   if (is.na(precision) || is.na(recall) || (precision == 0 && recall == 0)) {
     return(0)
   }
-  2 * precision * recall / (precision + recall)
+  2 * (precision * recall) / (precision + recall)
 }
 
-read_eval_table <- function(eval_file, target_chr = "", bed_file = "") {
+read_eval_table <- function(eval_file, target_chr = "", bed_file = "",
+                            remove_tie = FALSE, only_tie = FALSE) {
   stop_if_missing(eval_file, "eval file")
   evaldf <- fread(eval_file)
   colnames(evaldf)[1:2] <- c("chrom", "pos")
@@ -139,10 +150,6 @@ read_eval_table <- function(eval_file, target_chr = "", bed_file = "") {
 
   if (!"ratio_1" %in% colnames(evaldf)) {
     evaldf[, ratio_1 := safe_div(as.numeric(alt_reads), as.numeric(ref_reads) + as.numeric(alt_reads))]
-  }
-
-  if (target_chr != "") {
-    evaldf <- evaldf[chrom == target_chr]
   }
 
   if (bed_file != "") {
@@ -162,6 +169,17 @@ read_eval_table <- function(eval_file, target_chr = "", bed_file = "") {
   }
   evaldf[, skey := paste(key, ref, alt, sep = "|")]
   evaldf <- evaldf[!duplicated(key)]
+  if (remove_tie || only_tie) {
+    if (!"alt_tie" %in% names(evaldf)) stop("Tie options require alt_tie in the eval table.")
+    tied <- vapply(strsplit(as.character(evaldf$alt_tie), ","),
+                   function(x) length(setdiff(x, c("DEL", "INS"))) > 1, logical(1))
+    if (remove_tie) {
+      evaldf[tied, `:=`(genotype_0 = 1, genotype_1 = 0, genotype_2 = 0,
+                        Result_snv = 0, Result_heterzygosity = 0, Result_genotype = 0)]
+    }
+    if (only_tie) evaldf <- evaldf[tied]
+  }
+  if (target_chr != "") evaldf <- evaldf[chrom == target_chr]
   evaldf[, SNV_zygosity := 0L]
   evaldf[Zygosity == "Het" & Label == "ALT", SNV_zygosity := 1L]
   evaldf[Zygosity == "Hom" & Label == "ALT", SNV_zygosity := 2L]
@@ -193,8 +211,9 @@ estimate_performance <- function(evaldf, tool, num_total = 2, num_alt = 5, ratio
   pass_df <- callregion[filter == "PASS"]
   alt_df <- callregion[Label == "ALT"]
 
-  precision <- safe_div(sum(pass_df$Label == "ALT"), nrow(pass_df))
-  recall <- safe_div(sum(alt_df$filter == "PASS"), nrow(alt_df))
+  # Preserve NaN for an empty denominator, as estimate_performance() does.
+  precision <- sum(pass_df$Label == "ALT") / nrow(pass_df)
+  recall <- sum(alt_df$filter == "PASS") / nrow(alt_df)
   f1 <- calculate_f1(precision, recall)
 
   out <- data.table(
@@ -235,6 +254,13 @@ estimate_zygosity <- function(evaldf, tool, num_total = 2, num_alt = 5, ratio_al
     recall[i] <- safe_div(conf[i, i], sum(conf[, i]))
     f1[i] <- calculate_f1(precision[i], recall[i])
   }
+  variant_conf <- conf[2:3, 2:3]
+  precision2 <- diag(variant_conf) / rowSums(variant_conf)
+  recall2 <- diag(variant_conf) / colSums(variant_conf)
+  f1_2 <- 2 * (precision2 * recall2) / (precision2 + recall2)
+  precision2[is.nan(precision2)] <- 0
+  recall2[is.nan(recall2)] <- 0
+  f1_2[is.nan(f1_2)] <- 0
   data.table(
     tool = tool,
     num_total = num_total,
@@ -251,7 +277,12 @@ estimate_zygosity <- function(evaldf, tool, num_total = 2, num_alt = 5, ratio_al
     Precision_macro = mean(precision),
     Recall_macro = mean(recall),
     F1_macro = mean(f1),
-    F1_weighted = safe_div(sum(f1 * support), sum(support))
+    Precision_weighted = sum(precision * support) / sum(support),
+    Recall_weighted = sum(recall * support) / sum(support),
+    F1_weighted = sum(f1 * support) / sum(support),
+    Precision2_G1 = precision2[1], Precision2_G2 = precision2[2],
+    Recall2_G1 = recall2[1], Recall2_G2 = recall2[2],
+    F1_2_G1 = f1_2[1], F1_2_G2 = f1_2[2]
   )
 }
 
@@ -310,9 +341,14 @@ read_tool_manifest <- function(tools_file) {
   tools
 }
 
-parse_vcf_calls <- function(file, pass_filter = "") {
+parse_vcf_calls <- function(file, pass_filter = "", legacy_positions = NULL) {
   stop_if_missing(file, "VCF file")
-  vcf <- fread(file, header = FALSE, comment.char = "#", fill = TRUE)
+  # Use the same VCF reader as the historical wrapper, including .vcf.gz.
+  vcf <- tryCatch(as.data.table(read.delim(file, header = FALSE, comment.char = "#")),
+                  error = function(e) {
+                    if (grepl("no lines available in input", conditionMessage(e))) return(data.table())
+                    stop(e)
+                  })
   if (nrow(vcf) == 0) {
     out <- data.table(.site_key = character(), ref = character(), alt = character(), filter = character(), gt = character())
     setnames(out, ".site_key", "key")
@@ -320,7 +356,13 @@ parse_vcf_calls <- function(file, pass_filter = "") {
   }
   colnames(vcf)[1:min(10, ncol(vcf))] <- paste0("V", 1:min(10, ncol(vcf)))
   pass_filter <- pass_filter %||% "PASS,RNAEditing,."
-  vcf[, key := paste(V1, V2, sep = "|")]
+  if (is.null(legacy_positions)) {
+    vcf[, key := paste(V1, V2, sep = "|")]
+  } else {
+    # Exact get_metric_all_zyg_deepvariant() compatibility, intentionally uses
+    # LongCallR positions after restricting LongCallR to the eval background.
+    vcf[, key := paste(V1, legacy_positions, sep = "|")]
+  }
   if (toupper(pass_filter) %in% c("ALL", "ANY", "*")) {
     vcf[, filter_call := "PASS"]
   } else if (startsWith(pass_filter, "not:")) {
@@ -331,7 +373,8 @@ parse_vcf_calls <- function(file, pass_filter = "") {
     vcf[, filter_call := ifelse(V7 %in% pass_set, "PASS", "no")]
   }
   gt <- if ("V10" %in% colnames(vcf)) vcf$V10 else rep("", nrow(vcf))
-  out <- data.table(.site_key = vcf$key, ref = vcf$V4, alt = vcf$V5, filter = vcf$filter_call, gt = gt)
+  out <- data.table(.site_key = vcf$key, ref = vcf$V4, alt = vcf$V5, filter = vcf$filter_call, gt = gt,
+                    raw_filter = vcf$V7, pos = vcf$V2)
   setnames(out, ".site_key", "key")
   out
 }
@@ -386,38 +429,66 @@ parse_nanots_eval_calls <- function(file) {
   out
 }
 
-gt_to_zygosity <- function(gt) {
+legacy_profile <- function(row) {
+  name <- tolower(gsub("[^[:alnum:]]", "", row$legacy_caller %||% row$tool))
+  switch(name, longcallr = "longcallr", clair3rna = "clair3rna",
+         deepvariant = "deepvariant", nanots = "nanots", "generic")
+}
+
+gt_to_zygosity <- function(gt, profile = "generic") {
   gt <- as.character(gt)
   out <- rep(0L, length(gt))
   out[grepl("0[/|]1|1[/|]0", gt)] <- 1L
-  out[grepl("1[/|]1", gt)] <- 2L
+  # The original LongCallR and DeepVariant branches only grep unphased 1/1.
+  hom_pattern <- if (profile %in% c("longcallr", "deepvariant")) "1/1" else "1[/|]1"
+  out[grepl(hom_pattern, gt)] <- 2L
   out
 }
 
-apply_tool_calls <- function(base_eval, tool_row, adjust = TRUE) {
+apply_tool_calls <- function(base_eval, tool_row, adjust = TRUE, legacy_lc_positions = NULL) {
   type <- tolower(tool_row$type)
-  calls <- switch(
-    type,
-    nanots_eval = parse_nanots_eval_calls(tool_row$file),
-    vcf = parse_vcf_calls(tool_row$file, tool_row$pass_filter %||% ""),
-    table = parse_table_calls(tool_row),
-    stop("Unsupported tool type: ", tool_row$type, call. = FALSE)
-  )
-  calls <- calls[!duplicated(key)]
+  profile <- legacy_profile(tool_row)
+  default_pass <- switch(profile, clair3rna = "ALL", longcallr = "not:HomRef",
+                         deepvariant = "not:HomRef", "PASS,RNAEditing,.")
+  if (type == "nanots_eval" && identical(tool_row$tool, "NanoTS")) {
+    # Preserve preprocessing of the benchmark background (BED order/tie options).
+    calls <- data.table(.site_key = base_eval$key, ref = base_eval$ref, alt = base_eval$alt,
+                         filter = ifelse(base_eval$Result_snv > 0, "PASS", "no"),
+                         gt = ifelse(base_eval$Result_snv > 0,
+                                     ifelse(base_eval$Result_heterzygosity > 0, "0/1", "1/1"), "0/0"))
+    setnames(calls, ".site_key", "key")
+  } else {
+    calls <- switch(
+      type,
+      nanots_eval = parse_nanots_eval_calls(tool_row$file),
+      vcf = parse_vcf_calls(tool_row$file, tool_row$pass_filter %||% default_pass,
+                            if (profile == "deepvariant") legacy_lc_positions else NULL),
+      table = parse_table_calls(tool_row),
+      stop("Unsupported tool type: ", tool_row$type, call. = FALSE)
+    )
+  }
 
   eval_tool <- copy(base_eval)
   eval_tool[, `:=`(filter = "no", filter_zyg = 0L)]
   idx <- match(calls$key, eval_tool$key)
-  keep <- which(!is.na(idx))
+  # Original wrappers overlay PASS rows only; the last passing ALT wins.
+  keep <- which(!is.na(idx) & calls$filter == "PASS")
   if (length(keep) > 0) {
-    eval_tool[idx[keep], filter := calls$filter[keep]]
+    eval_tool[idx[keep], filter := "PASS"]
     eval_tool[idx[keep], alt := calls$alt[keep]]
-    eval_tool[idx[keep], filter_zyg := gt_to_zygosity(calls$gt[keep])]
   }
-  if (adjust) {
-    eval_tool <- adjust_genotype(eval_tool)
-    eval_tool[filter != "PASS", filter_zyg := 0L]
+  # Genotype evaluation is independent of PASS and allele adjustment. With
+  # duplicate sites, any hom-alt row overrides any heterozygous row.
+  zyg <- gt_to_zygosity(calls$gt, profile)
+  for (value in c(1L, 2L)) {
+    keep <- which(!is.na(idx) & zyg == value)
+    if (length(keep) > 0) eval_tool[idx[keep], filter_zyg := value]
   }
+  if (profile == "clair3rna" && "raw_filter" %in% names(calls)) {
+    keep <- which(!is.na(idx) & calls$raw_filter == "")
+    if (length(keep) > 0) eval_tool[idx[keep], filter_zyg := 0L]
+  }
+  if (adjust) eval_tool <- adjust_genotype(eval_tool)
   eval_tool
 }
 
@@ -426,8 +497,7 @@ make_default_tools <- function(eval_file) {
     tool = "NanoTS",
     file = eval_file,
     type = "nanots_eval",
-    pass_filter = "",
-    match_by = "pos"
+    pass_filter = ""
   )
 }
 
@@ -440,11 +510,24 @@ main <- function() {
   stop_if_missing(args$eval, "NanoTS eval benchmark file")
   dir.create(args$outdir, recursive = TRUE, showWarnings = FALSE)
 
-  base_eval <- read_eval_table(args$eval, target_chr = args$target_chr, bed_file = args$bed)
+  base_eval <- read_eval_table(args$eval, target_chr = args$target_chr, bed_file = args$bed,
+                               remove_tie = args$remove_tie, only_tie = args$only_tie)
   tools <- rbindlist(list(make_default_tools(args$eval), read_tool_manifest(args$tools)), fill = TRUE)
-  tools <- tools[file.exists(file)]
+  for (i in seq_len(nrow(tools))) stop_if_missing(tools$file[i], tools$tool[i])
   if (nrow(tools) == 0) {
     stop("No readable tool files found.", call. = FALSE)
+  }
+
+  if ("match_by" %in% names(tools) && any(!is.na(tools$match_by) & tools$match_by != "" & tools$match_by != "pos")) {
+    stop("Historical benchmarking supports position matching only.")
+  }
+  profiles <- vapply(seq_len(nrow(tools)), function(i) legacy_profile(tools[i]), character(1))
+  legacy_lc_positions <- NULL
+  if (any(profiles == "deepvariant")) {
+    lc <- which(profiles == "longcallr" & tolower(tools$type) == "vcf")
+    if (length(lc) != 1) stop("Exact historical DeepVariant benchmarking requires one LongCallR VCF in --tools.")
+    lc_calls <- parse_vcf_calls(tools$file[lc], "ALL")
+    legacy_lc_positions <- lc_calls[key %in% base_eval$key, pos]
   }
 
   threshold_values <- if (args$thresholds != "") {
@@ -460,7 +543,8 @@ main <- function() {
   for (i in seq_len(nrow(tools))) {
     tool_row <- tools[i]
     message("Benchmarking ", tool_row$tool, ": ", tool_row$file)
-    eval_tool <- apply_tool_calls(base_eval, tool_row, adjust = args$adjust_genotype)
+    eval_tool <- apply_tool_calls(base_eval, tool_row, adjust = args$adjust_genotype,
+                                  legacy_lc_positions = legacy_lc_positions)
 
     for (threshold in threshold_values) {
       num_total <- if (args$thresholds != "") threshold else args$num_total
@@ -488,12 +572,13 @@ main <- function() {
   genotype_df <- zygosity_wide_to_long(zygosity_df)
   callable_df <- rbindlist(callable_list, fill = TRUE)
 
-  fwrite(summary_df, file.path(args$outdir, "summary_metrics.tsv"), sep = "\t")
+  fwrite(summary_df, file.path(args$outdir, "summary_metrics.tsv"), sep = "\t", na = "NaN")
   fwrite(genotype_df, file.path(args$outdir, "genotype_metrics.tsv"), sep = "\t")
+  fwrite(zygosity_df, file.path(args$outdir, "genotype_metrics_wide.tsv"), sep = "\t", na = "NaN")
   fwrite(callable_df, file.path(args$outdir, "tool_site_counts.tsv"), sep = "\t")
   message("Wrote: ", file.path(args$outdir, "summary_metrics.tsv"))
   message("Wrote: ", file.path(args$outdir, "genotype_metrics.tsv"))
   message("Wrote: ", file.path(args$outdir, "tool_site_counts.tsv"))
 }
 
-main()
+if (sys.nframe() == 0L) main()
