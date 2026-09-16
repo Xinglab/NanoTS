@@ -12,7 +12,7 @@
 Ensure you have **Conda** installed, then create and activate the **nanoTS** environment and install **nanoTS**:
 
 ```bash
-git clone git@github.com:Xinglab/NanoTS.git     # or: git clone https://github.com/XingGitHub/NanoTS.git
+git clone https://github.com/Xinglab/NanoTS.git
 cd NanoTS
 conda env create -f environment.yml             # create the nanoTS environment (takes ~1 minute)
 conda activate nanoTS
@@ -24,7 +24,7 @@ pip install .                                    # installs in ~5 seconds
 Alternatively, after activating the **nanoTS** environment, run the NanoTS runner directly:
 
 ```bash
-python ./source/nanoTS-runner.py [OPTIONS]
+python ./source/nanoTS-runner.py <subcommand> [OPTIONS]
 ```
 
 
@@ -123,7 +123,7 @@ Performs haplotype phasing using an input VCF, reference genome, and BAM file.
 #### **Optional Arguments:**
 | Argument    | Default | Description                                           |
 |-------------|---------|-------------------------------------------------------|
-| `--hap_qual`  | 10      | QUAL threshold to filter SNPs during haplotype phasing.       |
+| `-q/--QUAL`  | 10      | QUAL threshold to filter SNPs during haplotype phasing.       |
 
 ---
 
@@ -252,11 +252,12 @@ nanoTS clean \
   --outdir $outdir
 ```
 
-Run NanoTS with Singularity (always bind host folders you read/write)
-```
+Run NanoTS with Singularity from the NanoTS repository root (always bind host folders you read/write):
+
+```bash
 cd example/
 
-SIF=../../../nanots_latest.sif # use your SIF path
+SIF=../nanots_latest.sif # assumes the SIF is in the NanoTS repository root; adjust if needed
 EXAMPLE_DIR="$(pwd)"
 MODEL_DIR="$(cd ../model && pwd)"   # the model folder in this repository. Adjust if your model files live elsewhere
 

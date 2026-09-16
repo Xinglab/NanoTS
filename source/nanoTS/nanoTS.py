@@ -344,7 +344,7 @@ def parse_arguments():
     """
     Parse command-line arguments using argparse.
     """
-    parser = argparse.ArgumentParser(description="nanoTS: Nanopore SNV calling using deep-learning method.")
+    parser = argparse.ArgumentParser(description="nanoTS: A deep-learning SNP caller for long-read transcriptome sequencing.")
     subparsers = parser.add_subparsers(dest="command", required=True, help="Sub-command to run")
     
     # Subcommand: bam

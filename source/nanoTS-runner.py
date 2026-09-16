@@ -1,4 +1,4 @@
-#!/scr1/users/liuz6/anaconda3/envs/xgboost/bin/python
+#!/usr/bin/env python3
 """
 Convenience wrapper for running nanoTS directly from source code.
 """

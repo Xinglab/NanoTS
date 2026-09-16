@@ -19,7 +19,7 @@ setup(
     version="1.0.0",
     author="Zelin Liu",
     author_email="liuz6@chop.edu",
-    description="A nanopore transcriptome SNP caller",
+    description="A deep-learning SNP caller for long-read transcriptome sequencing.",
     long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
     url="https://github.com/Xinglab/NanoTS",
