@@ -13,6 +13,7 @@ from nanoTS.predict_DNN import run_predict_dnn
 from nanoTS.predict_DNN_phase import run_predict_dnn_phase
 from nanoTS.whatshap import run_whatshap,run_command
 from nanoTS.version import __version__  
+from nanoTS.contigs import DEFAULT_CONTIGS, add_contigs_argument, contig_suffix, resolve_contigs, table_contigs
 
 import os 
 
@@ -90,7 +91,7 @@ def delete_related_files(outdir):
             except Exception as e:
                 logging.error(f"Error deleting {file}: {e}")
     
-def run_phased_call(bam, ref, threads, depth, model, outdir):
+def run_phased_call(bam, ref, threads, depth, model, outdir, contigs=None):
     ensure_directory_exists(outdir)
     unphased_dir=hap_dir=outdir
     unphased_step2_feature_alt_file=os.path.join(unphased_dir,'unphased_alt.txt')
@@ -114,33 +115,50 @@ def run_phased_call(bam, ref, threads, depth, model, outdir):
         if not os.path.exists(file_path):
             logging.error(f"Error: Required file {file_path} does not exist.")
             sys.exit(1)
+    selected_contigs = resolve_contigs(bam, ref, contigs)
+    resolve_contigs(H1_bam, ref, selected_contigs)
+    resolve_contigs(H2_bam, ref, selected_contigs)
     required_chr_files=[
         unphased_step2_feature_alt_file,
         unphased_step2_feature_alt_file_5,
         unphased_step2_feature_pkl_file
     ]
+    # A reused output directory may contain features for other datasets or
+    # selections. Only phase contigs present in the current prediction table.
+    prediction_table = os.path.join(outdir, 'unphased_predict.txt')
+    predicted_contigs = table_contigs(prediction_table) if os.path.exists(prediction_table) else None
     target_chr=[]
-    for i in list(map(str, range(1, 23))) + ['X', 'Y']:
-        chrom=f'.chr{i}'
-        if os.path.exists(unphased_step2_feature_alt_file+chrom) and os.path.exists(unphased_step2_feature_alt_file_5+chrom) and os.path.exists(unphased_step2_feature_pkl_file+chrom):
-            target_chr.append(i)
+    for chrom in selected_contigs:
+        if predicted_contigs is not None and chrom not in predicted_contigs:
+            continue
+        suffix = contig_suffix(chrom)
+        missing_files = [path + suffix for path in required_chr_files if not os.path.exists(path + suffix)]
+        if missing_files:
+            if predicted_contigs is not None:
+                raise ValueError(f"Missing unphased intermediate files for {chrom!r}: "
+                                 + ', '.join(missing_files))
+            continue
+        target_chr.append(chrom)
     logging.info(f"Processing chromosomes: {target_chr}")
+    if not target_chr:
+        raise ValueError("No unphased intermediate files found for the selected contigs. "
+                         "Use the same --contigs selection for unphased_call and phased_call.")
     
     phased_predict_detail_file = os.path.join(outdir, 'phased_predict.txt')
     
-    for i in target_chr:
-        chrom=f'.chr{i}'
+    for chrom in target_chr:
+        suffix = contig_suffix(chrom)
         logging.info(f'Start processing chrom {chrom} H1...')
         H1_feature_for_train = extract_VCF_feature( 
-            unphased_step2_feature_alt_file+chrom, H1_bam, ref, threads, depth, unphased_step2_feature_alt_file_5+chrom
+            unphased_step2_feature_alt_file+suffix, H1_bam, ref, threads, depth, unphased_step2_feature_alt_file_5+suffix
         )
-        with open(H1_feature_pkl_file+chrom, "wb") as file:
+        with open(H1_feature_pkl_file+suffix, "wb") as file:
             pickle.dump(H1_feature_for_train, file)
         logging.info(f'Start processing chrom {chrom} H2...')    
         H2_feature_for_train = extract_VCF_feature(
-            unphased_step2_feature_alt_file+chrom, H2_bam, ref, threads, depth, unphased_step2_feature_alt_file_5+chrom
+            unphased_step2_feature_alt_file+suffix, H2_bam, ref, threads, depth, unphased_step2_feature_alt_file_5+suffix
         )
-        with open(H2_feature_pkl_file+chrom, "wb") as file:
+        with open(H2_feature_pkl_file+suffix, "wb") as file:
             pickle.dump(H2_feature_for_train, file)
     
     logging.info("Run DNN model")
@@ -159,7 +177,7 @@ def run_phased_call(bam, ref, threads, depth, model, outdir):
     
     logging.info("Done")
     
-def run_haplotype(vcf, ref, bam,outdir,QUAL):
+def run_haplotype(vcf, ref, bam,outdir,QUAL, contigs=None):
     ensure_directory_exists(outdir)
     # List of required files to check
     required_files = [
@@ -177,28 +195,30 @@ def run_haplotype(vcf, ref, bam,outdir,QUAL):
     # Proceed with further processing if all files exist
     logging.info("All required files exist. Proceeding with haplotype processing...")
     
-    run_whatshap(vcf, ref, bam, outdir,QUAL)
+    selected_contigs = resolve_contigs(bam, ref, contigs)
+    run_whatshap(vcf, ref, bam, outdir,QUAL, selected_contigs)
     logging.info("Done")
 
-def loop_unphased_feature(step2_feature_alt_file,step2_feature_alt_file_5,step2_feature_pkl_file,filtered_variant,filtered_variant_5,bam, ref, threads,depth):
+def loop_unphased_feature(step2_feature_alt_file,step2_feature_alt_file_5,step2_feature_pkl_file,filtered_variant,filtered_variant_5,bam, ref, threads,depth, contigs=None):
     target_chr=[]
-    for i in list(map(str, range(1, 23))) + ['X', 'Y']:
-        each_f_var_file=step2_feature_alt_file+f'.chr{i}'
-        each_alt5_var=step2_feature_alt_file_5+f'.chr{i}'
-        each_filtered_variant=filtered_variant.loc[filtered_variant.loc[:,'chrom']==f'chr{i}',:]
+    for chrom in DEFAULT_CONTIGS if contigs is None else contigs:
+        suffix = contig_suffix(chrom)
+        each_f_var_file=step2_feature_alt_file+suffix
+        each_alt5_var=step2_feature_alt_file_5+suffix
+        each_filtered_variant=filtered_variant.loc[filtered_variant.loc[:,'chrom']==chrom,:]
         if each_filtered_variant.shape[0]==0:
             continue
-        logging.info(f"Start processing chr{i}")
-        target_chr.append(i)
+        logging.info(f"Start processing {chrom}")
+        target_chr.append(chrom)
         each_filtered_variant.to_csv(each_f_var_file, sep='\t', index=False)       
-        filtered_variant_5.loc[filtered_variant_5.loc[:,'chrom']==f'chr{i}',:].to_csv(each_alt5_var, sep='\t', index=False)       
+        filtered_variant_5.loc[filtered_variant_5.loc[:,'chrom']==chrom,:].to_csv(each_alt5_var, sep='\t', index=False)
          
         feature_for_train = extract_VCF_feature(each_f_var_file, bam, ref, threads,depth,each_alt5_var)
-        with open(step2_feature_pkl_file+'.chr'+str(i), "wb") as file:
+        with open(step2_feature_pkl_file+suffix, "wb") as file:
             pickle.dump(feature_for_train, file)
     return(target_chr)
 
-def run_unphased_call(bam, ref, region, ALT, total, ratio, threads, depth, model, outdir):
+def run_unphased_call(bam, ref, region, ALT, total, ratio, threads, depth, model, outdir, contigs=None):
     ensure_directory_exists(outdir)
     required_files = [
         bam,
@@ -214,6 +234,7 @@ def run_unphased_call(bam, ref, region, ALT, total, ratio, threads, depth, model
     
     # Proceed with further processing if all files exist
     logging.info("All required files exist. Proceeding with unphased call processing...")
+    selected_contigs = resolve_contigs(bam, ref, contigs, region)
     
     
     """
@@ -240,7 +261,8 @@ def run_unphased_call(bam, ref, region, ALT, total, ratio, threads, depth, model
                 min(total, 5),
                 ratio,
                 threads,
-                epsilon
+                epsilon,
+                selected_contigs
             )
     
     # Step 2: Filter VCF candidates
@@ -251,7 +273,8 @@ def run_unphased_call(bam, ref, region, ALT, total, ratio, threads, depth, model
         0,
         0,
         ALT,
-        total
+        total,
+        selected_contigs
     )
     filtered_variant_5 = filter_vcf(
         step1_candidate_out_file,
@@ -260,13 +283,12 @@ def run_unphased_call(bam, ref, region, ALT, total, ratio, threads, depth, model
         0,
         0,
         5,
-        5
+        5,
+        selected_contigs
     )
-    target_chr=loop_unphased_feature(step2_feature_alt_file,step2_feature_alt_file_5,step2_feature_pkl_file,filtered_variant,filtered_variant_5,bam, ref, threads,depth)
-    
-    matching_files = glob.glob(step2_feature_pkl_file+'*')
+    target_chr=loop_unphased_feature(step2_feature_alt_file,step2_feature_alt_file_5,step2_feature_pkl_file,filtered_variant,filtered_variant_5,bam, ref, threads,depth, selected_contigs)
 
-    if not matching_files:
+    if not target_chr:
         logging.info("No SNP candidates found")
         sys.exit(1)
     else:
@@ -291,11 +313,13 @@ def ensure_directory_exists(directory):
         logging.info(f"Directory '{directory}' already exists. Continuing...")
         
 def run_full_pipeline(bam, ref, model_unphased, model_phased, outdir,
-                      threads, ALT, total, ratio, depth, hap_qual,region):
+                      threads, ALT, total, ratio, depth, hap_qual,region, contigs=None):
     """
     Full NanoTS pipeline from BAM to final phased VCF, then clean up.
     """
     logging.info("=== Starting full_pipeline ===")
+    selected_contigs = resolve_contigs(bam, ref, contigs, region)
+    logging.info(f"Selected contigs: {selected_contigs}")
     ensure_directory_exists(outdir)
     
     # 1) Suffix QNAMEs
@@ -313,7 +337,8 @@ def run_full_pipeline(bam, ref, model_unphased, model_phased, outdir,
         threads=threads,
         depth=depth,
         model=model_unphased,
-        outdir=outdir
+        outdir=outdir,
+        contigs=selected_contigs
     )
     
     # 3) Haplotype phasing
@@ -323,7 +348,8 @@ def run_full_pipeline(bam, ref, model_unphased, model_phased, outdir,
         ref=ref,
         bam=suffixed_bam,
         outdir=outdir,
-        QUAL=hap_qual
+        QUAL=hap_qual,
+        contigs=selected_contigs
     )
     
     # 4) Phased SNP calling
@@ -333,7 +359,8 @@ def run_full_pipeline(bam, ref, model_unphased, model_phased, outdir,
         threads=threads,
         depth=depth,
         model=model_phased,
-        outdir=outdir
+        outdir=outdir,
+        contigs=selected_contigs
     )
     
     # 5) Clean up
@@ -429,56 +456,65 @@ def parse_arguments():
                              help="QUAL threshold for haplotype phasing (default: 10)")
     parser_full.add_argument("--region", help="Region (e.g., chr1 or chr1:1000-2000)")
 
+    for subparser in (parser_unphased, parser_haplotype, parser_phased, parser_full):
+        add_contigs_argument(subparser)
 
-    return parser.parse_args()
+
     return parser.parse_args()
 
 def main():
     args = parse_arguments()
-    if args.command == "bam":
-        run_suffix_qname_by_alignment(args.input,args.output,args.region)  
-    elif args.command == "unphased_call":
-        run_unphased_call(
-            bam=args.bam,
-            ref=args.ref,
-            region=args.region,
-            ALT=args.ALT,
-            total=args.total,
-            ratio=args.ratio,
-            threads=args.threads,
-            depth=args.depth,
-            model=args.model,
-            outdir=args.outdir
-        )
-    elif args.command == "haplotype":
-        run_haplotype(
-            args.vcf, args.ref,args.bam,args.outdir,args.QUAL
-        )
-    elif args.command == "phased_call":
-        run_phased_call(
-        args.bam, args.ref, args.threads, args.depth, args.model, args.outdir
-        )
-    elif args.command == "clean":
-        delete_related_files(args.outdir)
-    elif args.command == "full_pipeline":
-        run_full_pipeline(
-            bam=args.bam,
-            ref=args.ref,
-            model_unphased=args.model_unphased,
-            model_phased=args.model_phased,
-            outdir=args.outdir,
-            threads=args.threads,
-            ALT=args.ALT,
-            total=args.total,
-            ratio=args.ratio,
-            depth=args.depth,
-            hap_qual=args.hap_qual,
-            region=args.region
-        )
-    else:
-        print("Invalid command")
+    try:
+        if args.command == "bam":
+            run_suffix_qname_by_alignment(args.input,args.output,args.region)
+        elif args.command == "unphased_call":
+            run_unphased_call(
+                bam=args.bam,
+                ref=args.ref,
+                region=args.region,
+                ALT=args.ALT,
+                total=args.total,
+                ratio=args.ratio,
+                threads=args.threads,
+                depth=args.depth,
+                model=args.model,
+                outdir=args.outdir,
+                contigs=args.contigs
+            )
+        elif args.command == "haplotype":
+            run_haplotype(
+                args.vcf, args.ref,args.bam,args.outdir,args.QUAL,args.contigs
+            )
+        elif args.command == "phased_call":
+            run_phased_call(
+            args.bam, args.ref, args.threads, args.depth, args.model, args.outdir,args.contigs
+            )
+        elif args.command == "clean":
+            delete_related_files(args.outdir)
+        elif args.command == "full_pipeline":
+            run_full_pipeline(
+                bam=args.bam,
+                ref=args.ref,
+                model_unphased=args.model_unphased,
+                model_phased=args.model_phased,
+                outdir=args.outdir,
+                threads=args.threads,
+                ALT=args.ALT,
+                total=args.total,
+                ratio=args.ratio,
+                depth=args.depth,
+                hap_qual=args.hap_qual,
+                region=args.region,
+                contigs=args.contigs
+            )
+        else:
+            print("Invalid command")
+            sys.exit(1)
+
+    except ValueError as exc:
+        logging.error("%s", exc)
         sys.exit(1)
-        
+
 
 if __name__ == "__main__":
     main()

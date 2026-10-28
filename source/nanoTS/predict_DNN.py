@@ -23,6 +23,10 @@ warnings.filterwarnings("ignore")
 
 import math
 import pysam
+if __package__:
+    from .contigs import contig_suffix, prediction_contigs
+else:
+    from contigs import contig_suffix, prediction_contigs
 
 def convert_to_vcf(df, output_file,contigs):
     """
@@ -403,8 +407,8 @@ def organize_variant(predict_list,variant_df,model):
 
 def run_predict_dnn(input_file,variant_file,model_path,output_file,bam_path,target_chr=[]):
     if bam_path:
-        bam = pysam.AlignmentFile(bam_path, "rb")
-        contigs = {ref["SN"]: ref["LN"] for ref in bam.header["SQ"]}
+        with pysam.AlignmentFile(bam_path, "rb") as bam:
+            contigs = dict(zip(bam.references, bam.lengths))
     else:
         # hg38
         contigs = {
@@ -423,13 +427,14 @@ def run_predict_dnn(input_file,variant_file,model_path,output_file,bam_path,targ
     if len(target_chr)>0:
         variant_df_list = []
 
-        for i in target_chr:
-            print(f'Start processing chr{i}')
-            with open(input_file+f'.chr{i}', "rb") as file:
+        for chrom in prediction_contigs(target_chr, contigs):
+            print(f'Start processing {chrom}')
+            suffix = contig_suffix(chrom)
+            with open(input_file+suffix, "rb") as file:
                 predict_list = list(pickle.load(file).values())
             
             # Load variant DataFrame
-            variant_df_each = pd.read_csv(variant_file+f'.chr{i}', sep='\t')
+            variant_df_each = pd.read_csv(variant_file+suffix, sep='\t', converters={'chrom': str})
 
             # Prepare data
             print(f'Predicting {len(predict_list)} SNVs')
@@ -444,7 +449,7 @@ def run_predict_dnn(input_file,variant_file,model_path,output_file,bam_path,targ
             predict_list = list(pickle.load(file).values())
         
         # Load variant DataFrame
-        variant_df = pd.read_csv(variant_file, sep='\t')
+        variant_df = pd.read_csv(variant_file, sep='\t', converters={'chrom': str})
 
         # Prepare data
         print(f'Predicting {len(predict_list)} SNVs')

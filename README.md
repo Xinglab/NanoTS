@@ -4,6 +4,14 @@
 
 * **ONT:** cDNA and direct RNA (R10.4.1)
 * **PacBio:** HiFi MAS-seq cDNA
+
+## **Update**
+
+**v1.0.1**
+
+* Added `--contigs auto` and explicit contig selection throughout calling and phasing, supporting RefSeq and numeric chromosome names.
+* Fixed region parsing and duplicate sites at region chunk boundaries, and prevented stale intermediate files from entering phased results. The default `chr*` selection is preserved.
+
 ---
 
 ## **Installation**
@@ -101,6 +109,7 @@ Append a numeric suffix to each BAM alignment QNAME based on its count per read,
 |-------------|---------|-----------------------------------------------------------|
 | `--threads` | 24      | Number of CPU threads.                                    |
 | `--region`  | None    | Target region for analysis (`chr1` or `chr1:1000-2000`).              |
+| `--contigs` | Canonical `chr*` names | Exact contig names, or `auto` for all contigs shared by BAM and FASTA. |
 | `--ALT`     | 2       | Minimum number of reads supporting the ALT allele.                                |
 | `--total`   | 2       | Minimum total read coverage required at a variant site.   |
 | `--ratio`   | 0.05    | Minimum proportion of ALT reads relative to total coverage.  |
@@ -124,6 +133,7 @@ Performs haplotype phasing using an input VCF, reference genome, and BAM file.
 | Argument    | Default | Description                                           |
 |-------------|---------|-------------------------------------------------------|
 | `-q/--QUAL`  | 10      | QUAL threshold to filter SNPs during haplotype phasing.       |
+| `--contigs` | Canonical `chr*` names | Exact contig names, or `auto` for all contigs shared by BAM and FASTA. |
 
 ---
 
@@ -143,6 +153,7 @@ Extracts features from H1 & H2 BAM and performs phased deep learning-based SNP c
 |-------------|---------|-------------------------------------------------------|
 | `--threads` | 24      | Number of CPU threads.                                |
 | `--depth`   | 1000    | Maximum reads per variant (`0` to disable limit).   |
+| `--contigs` | Canonical `chr*` names | Exact contig names, or `auto` for all contigs shared by BAM and FASTA. |
 
 ---
 
@@ -173,11 +184,30 @@ Runs the entire NanoTS pipeline from a BAM file through final phased VCF output,
 |---------------|---------|---------------------------------------------------------------|
 | `--threads` | 24      | Number of CPU threads.                                    |
 | `--region`  | None    | Target region for analysis (`chr1` or `chr1:1000-2000`).              |
+| `--contigs` | Canonical `chr*` names | Exact contig names, or `auto` for all contigs shared by BAM and FASTA. |
 | `--ALT`     | 2       | Minimum number of reads supporting the ALT allele.                                |
 | `--total`   | 2       | Minimum total read coverage required at a variant site.   |
 | `--ratio`   | 0.05    | Minimum proportion of ALT reads relative to total coverage.  |
 | `--depth`   | 1000    | Maximum number of reads sampled per variant (`0` to disable limit).       |
 | `--hap_qual`  | 10      | QUAL threshold to filter SNPs during haplotype phasing.       |
+
+### **Reference contig selection**
+
+By default, NanoTS analyzes `chr1`–`chr22`, `chrX`, and `chrY` that are present in the BAM. For references with other naming schemes, such as CHM13 RefSeq accessions or `1`/`2`, add `--contigs auto` to analyze all contigs shared by the BAM and reference FASTA. This includes mitochondrial, alternate, or other contigs if they occur in both inputs. Contig names and lengths must agree between the BAM and FASTA; output VCFs retain the reference's exact names.
+
+```bash
+nanoTS full_pipeline \
+  --bam cDNA.bam \
+  --ref CHM13.fasta \
+  --model_unphased model/unphased_cDNA_nanopore_R104_HG002.pth \
+  --model_phased model/phased_cDNA_nanopore_R104_HG002.pth \
+  --outdir cDNA_nanots \
+  --contigs auto
+```
+
+To select specific contigs, use a space-separated list, for example `--contigs NC_060925.1 NC_060926.1`. A single contig or interval can also be selected with `--region NC_060925.1` or `--region NC_060925.1:1000-2000`. If both options are supplied, the region's contig must be included in `--contigs`.
+
+`full_pipeline` passes the selection through all calling and phasing steps. When running `unphased_call`, `haplotype`, and `phased_call` separately, supply the same `--contigs` selection to each command.
 
 ---
 ## **Example Workflow**

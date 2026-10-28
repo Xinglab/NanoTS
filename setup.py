@@ -16,7 +16,7 @@ def read_requirements(filename):
 
 setup(
     name="nanoTS",
-    version="1.0.0",
+    version="1.0.1",
     author="Zelin Liu",
     author_email="liuz6@chop.edu",
     description="A deep-learning SNP caller for long-read transcriptome sequencing.",

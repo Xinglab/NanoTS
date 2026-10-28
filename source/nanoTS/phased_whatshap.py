@@ -2,6 +2,12 @@ import os
 import subprocess
 import sys
 import argparse
+if __package__:
+    from .contigs import DEFAULT_CONTIGS, add_contigs_argument, resolve_contigs
+    from .whatshap import filter_vcf_contigs as select_vcf_contigs
+else:
+    from contigs import DEFAULT_CONTIGS, add_contigs_argument, resolve_contigs
+    from whatshap import filter_vcf_contigs as select_vcf_contigs
 
 def run_command(cmd):
     """Run a shell command and exit if it fails."""
@@ -19,43 +25,27 @@ def parse_arguments():
                         help="Path to the reference genome (hg38.fa).")
     parser.add_argument("--bam", required=True,
                         help="Path to the input BAM file.")
-    parser.add_argument("--phase", required=True,
-                        help="Directory for phasing output.")
+    parser.add_argument("--outdir", required=True,
+                        help="Directory for phased VCF and BAM output.")
+    add_contigs_argument(parser)
     parser.add_argument("--phase", required=True,
                         help="Directory for phasing output.")
     return parser.parse_args()
-def filter_vcf_contigs(input_vcf, output_vcf):
-    """
-    Reads a VCF file and removes header contig lines that are not from chr1 to chr22.
-
-    :param input_vcf: Path to the input VCF file.
-    :param output_vcf: Path to the output VCF file with filtered header.
-    """
-    import re
-
-    valid_contigs = {f"chr{i}" for i in range(1, 23)}  # Set of valid chromosome IDs (chr1 to chr22)
-    
-    with open(input_vcf, 'r') as infile, open(output_vcf, 'w') as outfile:
-        for line in infile:
-            if line.startswith("##contig="):
-                # Extract contig ID using regex
-                match = re.search(r'##contig=<ID=([^,>]+)', line)
-                if match:
-                    contig_id = match.group(1)
-                    if contig_id not in valid_contigs:
-                        continue  # Skip writing this line if it's not in chr1-chr22
-
-            # Write all other lines
-            outfile.write(line)
+def filter_vcf_contigs(input_vcf, output_vcf, contigs=None):
+    """Filter VCF headers and records, defaulting to the autosomes."""
+    select_vcf_contigs(input_vcf, output_vcf, DEFAULT_CONTIGS[:-2] if contigs is None else contigs)
 
 # Example usage:
 # filter_vcf_contigs("input.vcf", "filtered_output.vcf")
 
-def run_whatshap(vcf, ref, bam, phase,outdir):
+def run_whatshap(vcf, ref, bam, phase,outdir, contigs=None):
     """Run the phasing pipeline using provided parameters."""
     # Create output directory if it doesn't exist
     os.makedirs(phase, exist_ok=True)
     os.makedirs(outdir, exist_ok=True)
+    selected_contigs = resolve_contigs(bam, ref, contigs)
+    if contigs is None:
+        selected_contigs = [chrom for chrom in selected_contigs if chrom in DEFAULT_CONTIGS[:-2]]
 
     # Step 0: Filter VCF by quality (keep header lines and variants with QUAL >= 10)
     filter_cmd = (
@@ -63,7 +53,7 @@ def run_whatshap(vcf, ref, bam, phase,outdir):
         f"\"{vcf}\" > \"{vcf}_filtered.vcf\""
     )
     run_command(filter_cmd)
-    filter_vcf_contigs(f'{vcf}_filtered.vcf', f'{vcf}_filtered2.vcf')
+    filter_vcf_contigs(f'{vcf}_filtered.vcf', f'{vcf}_filtered2.vcf', selected_contigs)
     # Step 1: Perform Whatshap Phasing using high-confidence variants
     phase_cmd = (
         f"whatshap phase --ignore-read-groups --reference \"{ref}\" "
@@ -103,7 +93,7 @@ def run_whatshap(vcf, ref, bam, phase,outdir):
 
 def main():
     args = parse_arguments()
-    run_whatshap(vcf=args.vcf, ref=args.ref, bam=args.bam, phase=args.phase,outdir=args.outdir)
+    run_whatshap(vcf=args.vcf, ref=args.ref, bam=args.bam, phase=args.phase,outdir=args.outdir,contigs=args.contigs)
 
 if __name__ == "__main__":
     try:

@@ -14,6 +14,10 @@ import math
 import sys
 from collections import defaultdict
 from bisect import bisect_left
+if __package__:
+    from .contigs import DEFAULT_CONTIGS, add_contigs_argument, resolve_contigs
+else:
+    from contigs import DEFAULT_CONTIGS, add_contigs_argument, resolve_contigs
     
 
 def get_all_nearest_neighbors(candidate_arr, query_positions, query_refs, query_alts, n=10):
@@ -79,11 +83,11 @@ def extract_tasks_with_nearest_snvs_preserve_order(vcf_file, bam_file, reference
             all_records.append((line_index, chrom, pos, ref, alt))
             line_index += 1
 
-    # 2) Parse all_var and build a candidate array (assumes same chromosome)
+    # 2) Keep neighboring candidates on the same contig as each query.
     if all_var is None:
         raise ValueError("You must provide the path to all_var.")
     
-    candidate_list = []
+    candidate_by_chrom = defaultdict(list)
     with open(all_var, 'r') as f_all:
         header = f_all.readline()
         for line in f_all:
@@ -94,23 +98,24 @@ def extract_tasks_with_nearest_snvs_preserve_order(vcf_file, bam_file, reference
             cpos = int(fields[1])
             cref = fields[2]
             calt = fields[3]
-            candidate_list.append((cpos, cref, calt))
-    # Sort candidate_list by position (if not already sorted)
-    candidate_list.sort(key=lambda x: x[0])
-    # Convert to a numpy array of dtype object so that string columns are preserved.
-    candidate_arr = np.array(candidate_list, dtype=object)
-    
-    # 3) Vectorize the nearest neighbor search:
-    # Build arrays for query positions, refs, alts from all_records.
-    query_positions = np.array([rec[2] for rec in all_records], dtype=np.int64)
-    query_refs = np.array([rec[3] for rec in all_records])
-    query_alts = np.array([rec[4] for rec in all_records])
-    
-    # Get nearest neighbors for all queries in one go.
-    if len(candidate_arr)>0:
-    	neighbors_list = get_all_nearest_neighbors(candidate_arr, query_positions, query_refs, query_alts, n=10)
-    else:
-        neighbors_list=[{}] * len(all_records)
+            candidate_by_chrom[cchrom].append((cpos, cref, calt))
+    query_by_chrom = defaultdict(list)
+    for index, record in enumerate(all_records):
+        query_by_chrom[record[1]].append(index)
+    neighbors_list = [{} for _ in all_records]
+    for chrom, indices in query_by_chrom.items():
+        candidates = sorted(candidate_by_chrom[chrom], key=lambda x: x[0])
+        if not candidates:
+            continue
+        records = [all_records[index] for index in indices]
+        neighbors = get_all_nearest_neighbors(
+            np.array(candidates, dtype=object),
+            np.array([rec[2] for rec in records], dtype=np.int64),
+            np.array([rec[3] for rec in records]),
+            np.array([rec[4] for rec in records]), n=10,
+        )
+        for index, neighbor in zip(indices, neighbors):
+            neighbors_list[index] = neighbor
     
     # 4) Build tasks by combining the records and the corresponding neighbors.
     tasks = []
@@ -340,11 +345,11 @@ def calculate_entropy_matrix(fraction_matrix):
         entropies.append(calculate_entropy_column(col))
     return np.array(entropies)
 
-def filter_vcf(vcf_file, filtered_vcf_file, ratio_threshold, llr_threshold, llr_diff_threshold,alt_min,total_min):
+def filter_vcf(vcf_file, filtered_vcf_file, ratio_threshold, llr_threshold, llr_diff_threshold,alt_min,total_min, contigs=None):
     # Load VCF data (example assumes a pandas DataFrame for simplicity)
 
     
-    vcf_data = pd.read_csv(vcf_file, sep='\t')
+    vcf_data = pd.read_csv(vcf_file, sep='\t', converters={'chrom': str})
      #ref_reads       alt_reads
     # Apply the filters
     filtered_vcf = vcf_data[
@@ -356,11 +361,13 @@ def filter_vcf(vcf_file, filtered_vcf_file, ratio_threshold, llr_threshold, llr_
         (vcf_data['LLR_1'] >= llr_threshold) &
         ((vcf_data['LLR_1'] - vcf_data['LLR_2']) >= llr_diff_threshold)
     ]
-    # 1. Filter to only include chromosomes 1 to 22
-    df_filtered = filtered_vcf[filtered_vcf['chrom'].str.match(r'^chr([1-9]|1[0-9]|2[0-2]|X|Y|M)$')].copy()
-
-    # 2. Create a mapping for chromosome ordering
-    chrom_order = {f'chr{i}': i for i  in list(map(str, range(1, 23))) + ['X', 'Y', 'M']}
+    # Retain the default filter's ordering for direct callers; pipeline callers
+    # supply exact contig names and their selected order.
+    if contigs is None:
+        chrom_order = {chrom: chrom[3:] for chrom in (*DEFAULT_CONTIGS, 'chrM')}
+    else:
+        chrom_order = {chrom: i for i, chrom in enumerate(contigs)}
+    df_filtered = filtered_vcf[filtered_vcf['chrom'].astype(str).isin(chrom_order)].copy()
 
 
     # 3. Map the chromosome column to a numeric order column
@@ -719,6 +726,7 @@ def extract_VCF_feature(vcf_file, bam_file, reference_file, num_processes,read_d
         }
     return variant_features
 def run_snp_feature_extraction_multiple(args):
+    selected_contigs = resolve_contigs(args.bam, args.ref, getattr(args, 'contigs', None))
     filtered_variant = filter_vcf(
         args.variant,
         args.filtered_variant,
@@ -726,8 +734,10 @@ def run_snp_feature_extraction_multiple(args):
         args.llr_threshold,
         args.llr_diff_threshold,
         args.ALT,
-        args.total
+        args.total,
+        selected_contigs
     )
+    filtered_variant.to_csv(args.filtered_variant, sep='\t', index=False)
     if args.all_v:
         all_filtered_variant = filter_vcf(
             args.all_v,
@@ -736,7 +746,8 @@ def run_snp_feature_extraction_multiple(args):
             args.llr_threshold,
             args.llr_diff_threshold,
             5,
-            5
+            5,
+            selected_contigs
             
         )
     else:
@@ -747,12 +758,12 @@ def run_snp_feature_extraction_multiple(args):
             args.llr_threshold,
             args.llr_diff_threshold,
             5,
-            5   
+            5,
+            selected_contigs
         )
-    if args.all_v:
-        feature_for_train = extract_VCF_feature(args.filtered_variant, args.bam, args.ref, args.threads,args.depth,args.all_v+'.filter')
-    else:
-        feature_for_train = extract_VCF_feature(args.filtered_variant, args.bam, args.ref, args.threads,args.depth,args.filtered_variant+'.alt_5')
+    all_filtered_path = args.all_v+'.filter' if args.all_v else args.filtered_variant+'.alt_5'
+    all_filtered_variant.to_csv(all_filtered_path, sep='\t', index=False)
+    feature_for_train = extract_VCF_feature(args.filtered_variant, args.bam, args.ref, args.threads,args.depth,all_filtered_path)
     with open(args.output, "wb") as file:
         pickle.dump(feature_for_train, file)
     
@@ -762,6 +773,7 @@ if __name__ == "__main__":
     parser.add_argument("-v", '--variant', required=True, help="Path to input SNV file")
     parser.add_argument("--bam", required=True, help="Path to input BAM file")
     parser.add_argument("--ref", required=True, help="Path to reference genome fasta file")
+    add_contigs_argument(parser)
     parser.add_argument("--output", required=True, help="Path to output pickle file for storing SNP features")
     parser.add_argument("--all_v",  help="Only for training. Input all variants")
     parser.add_argument("--filtered_variant", required=True, help="Path to output filtered SNV file")

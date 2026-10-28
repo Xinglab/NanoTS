@@ -8,6 +8,10 @@ from scipy.optimize import minimize
 from multiprocessing import Pool
 import numpy as np
 import progressbar
+if __package__:
+    from .contigs import add_contigs_argument, parse_region, resolve_contigs
+else:
+    from contigs import add_contigs_argument, parse_region, resolve_contigs
 def log_likelihood(lambda_, i, k, epsilon=0.05):
     """Log-likelihood function for RNA editing level estimation."""
     p = lambda_ * (1 - epsilon) + (1 - lambda_) * epsilon
@@ -190,21 +194,19 @@ def split_regions_start(chrom, start_pos,end_pos, block_size=100000):
     Split a chromosome into smaller blocks of specified size.
     """
     regions = []
-    target_chrom=[f'chr{i}' for i in range(1,23)] + ['chrX','chrY']
-    if chrom in target_chrom:
-        for start in range(start_pos, end_pos+1, block_size):
-            end = min(start + block_size, end_pos)
-            regions.append(f"{chrom}:{start}-{end}")
-        return regions
+    for start in range(start_pos, end_pos+1, block_size):
+        end = min(start + block_size - 1, end_pos)
+        regions.append(f"{chrom}:{start}-{end}")
+    return regions
         
-def process_bam(bam_path, ref_path, region=None, mismatch=5, total=10, ratio=0.05, threads=4,epsilon=0.01):
+def process_bam(bam_path, ref_path, region=None, mismatch=5, total=10, ratio=0.05, threads=4,epsilon=0.01, contigs=None):
     """
     Process the BAM file using multiprocessing for the specified region.
     """
     # Read chromosome information from BAM file
-    bam = pysam.AlignmentFile(bam_path, "rb")
-    chrom_lengths = {ref["SN"]: ref["LN"] for ref in bam.header["SQ"]}
-    bam.close()
+    selected_contigs = resolve_contigs(bam_path, ref_path, contigs, region)
+    with pysam.AlignmentFile(bam_path, "rb") as bam:
+        chrom_lengths = dict(zip(bam.references, bam.lengths))
     headline='\t'.join([str(i) for i in ["chrom", "pos", "ref", "alt", "ref_reads", "alt_reads", "ratio_1", "lambda_1", "LLR_1",
                          "ratio_2", "lambda_2", "LLR_2",'alt_tie']])
     # Combine and write results to stdout
@@ -214,26 +216,16 @@ def process_bam(bam_path, ref_path, region=None, mismatch=5, total=10, ratio=0.0
     # Determine regions to process
     regions = []
     if region:
-        match = re.match(r"(\w+)(?::(\d+)-(\d+))?", region)
-        if not match:
-            raise ValueError("Invalid region format. Use 'chrom:start-end' or 'chrom'.")
-        chrom = match.group(1)
-        start = int(match.group(2)) if match.group(2) else 1
-        end = int(match.group(3)) if match.group(3) else chrom_lengths[chrom]
-        if start > chrom_lengths[chrom] or start<1 or start>end:
-            raise ValueError("Invalid region 'start' scale.")
-        if end >chrom_lengths[chrom]:
-            end=chrom_lengths[chrom]
+        chrom, start, end = parse_region(region, chrom_lengths)
         print(f"Detect SNV from {chrom}:{start}-{end}", file=sys.stderr)
 
         regions = split_regions_start(chrom,start, end)
     else:
         print(f"Detect SNV from", file=sys.stderr)
-        target_chrom=[f'chr{i}' for i in range(1,23)] + ['chrX','chrY']
-        print(target_chrom,file=sys.stderr)
+        print(selected_contigs,file=sys.stderr)
         
         for chrom, length in chrom_lengths.items():
-            if chrom in target_chrom:
+            if chrom in selected_contigs:
                 regions.extend(split_regions(chrom, length))
 
     # Run samtools mpileup for each region in parallel
@@ -276,6 +268,7 @@ if __name__ == "__main__":
     parser.add_argument("--bam", required=True, help="Path to input BAM file")
     parser.add_argument("--ref", required=True, help="Path to reference genome fasta file")
     parser.add_argument("--region", required=False, help="Region to process (e.g., chr1 or chr1:1000-2000)")
+    add_contigs_argument(parser)
     parser.add_argument("--ALT", type=int, default=5, help="Minimum ALT SNV coverage (default: 5)")
     parser.add_argument("--total", type=int, default=10, help="Minimum total base coverage (default: 10)")
     parser.add_argument("--ratio", type=float, default=0.05, help="Minimum ratio of ALT SNV (default: 0.05)")
@@ -283,5 +276,5 @@ if __name__ == "__main__":
     parser.add_argument("--threads", type=int, default=4, help="Number of threads to use (default: 4)")
     args = parser.parse_args()
     args.epsilon=args.epsilon/5
-    process_bam(args.bam, args.ref, args.region, args.ALT, args.total, args.ratio, args.threads,args.epsilon)
+    process_bam(args.bam, args.ref, args.region, args.ALT, args.total, args.ratio, args.threads,args.epsilon, args.contigs)
 

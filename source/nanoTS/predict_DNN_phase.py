@@ -25,6 +25,10 @@ import math
 import pysam
 
 from scipy.stats import fisher_exact
+if __package__:
+    from .contigs import contig_suffix, prediction_contigs
+else:
+    from contigs import contig_suffix, prediction_contigs
 
 def convert_to_vcf(df, output_file,contigs):
     """
@@ -477,8 +481,8 @@ def organize_variant_phase(raw_list,h1_list,h2_list,variant_df,model,FET_enable)
     
 def run_predict_dnn_phase(raw_pkl,h1_pkl,h2_pkl,variant_file,model_path,output_file,bam_path,target_chr=[],FET_enable=True):
     if bam_path:
-        bam = pysam.AlignmentFile(bam_path, "rb")
-        contigs = {ref["SN"]: ref["LN"] for ref in bam.header["SQ"]}
+        with pysam.AlignmentFile(bam_path, "rb") as bam:
+            contigs = dict(zip(bam.references, bam.lengths))
     else:
         # hg38
         contigs = {
@@ -496,18 +500,18 @@ def run_predict_dnn_phase(raw_pkl,h1_pkl,h2_pkl,variant_file,model_path,output_f
     print("Model loaded for predictions.")
     if len(target_chr)>0:
         variant_df_list = []
-        for i in target_chr:
-            print(f'Start processing chr{i}')
-            chrom=f'.chr{i}'
+        for chrom in prediction_contigs(target_chr, contigs):
+            print(f'Start processing {chrom}')
+            suffix = contig_suffix(chrom)
             # Load input data
-            with open(raw_pkl+chrom, "rb") as file:
+            with open(raw_pkl+suffix, "rb") as file:
                 raw_list = list(pickle.load(file).values())
-            with open(h1_pkl+chrom, "rb") as file:
+            with open(h1_pkl+suffix, "rb") as file:
                 h1_list = list(pickle.load(file).values())
-            with open(h2_pkl+chrom, "rb") as file:
+            with open(h2_pkl+suffix, "rb") as file:
                 h2_list = list(pickle.load(file).values())
             # Load variant DataFrame
-            variant_df_each = pd.read_csv(variant_file+chrom, sep='\t')
+            variant_df_each = pd.read_csv(variant_file+suffix, sep='\t', converters={'chrom': str})
 
             # Prepare data
             print(f'Predicting {len(raw_list)} SNVs')
@@ -523,7 +527,7 @@ def run_predict_dnn_phase(raw_pkl,h1_pkl,h2_pkl,variant_file,model_path,output_f
             h1_list = list(pickle.load(file).values())
         with open(h2_pkl, "rb") as file:
             h2_list = list(pickle.load(file).values())
-        variant_df = pd.read_csv(variant_file, sep='\t')
+        variant_df = pd.read_csv(variant_file, sep='\t', converters={'chrom': str})
         # Prepare data
         print(f'Predicting {len(raw_list)} SNVs')
         if len(raw_list)>0:
