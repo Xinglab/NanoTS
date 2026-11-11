@@ -16,7 +16,7 @@
 
 ## **Installation**
 **Note**: NanoTS is currently supported **only on Linux systems**.
-### Option 1: Conda
+
 Ensure you have **Conda** installed, then create and activate the **nanoTS** environment and install **nanoTS**:
 
 ```bash
@@ -35,14 +35,6 @@ Alternatively, after activating the **nanoTS** environment, run the NanoTS runne
 python ./source/nanoTS-runner.py <subcommand> [OPTIONS]
 ```
 
-
-### Option 2: Singularity
-Ensure you have **Singularity** installed, then pull the `nanoTS` container to use it instantly without installation:
-
-```bash
-singularity pull library://zelinliu/nanots/nanots:latest
-
-```
 ---
 
 ## **Supported Platforms & Models**
